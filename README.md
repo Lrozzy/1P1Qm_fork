@@ -11,7 +11,7 @@ To test saved run:
 
 
 
-If you use the code please cite:
+**If you use the code please cite:**
 >@article{Ngairangbam:2021yma,
     author = "Ngairangbam, Vishal S. and Spannowsky, Michael and Takeuchi, Michihisa",
     title = "{Anomaly detection in high-energy physics using a quantum autoencoder}",
