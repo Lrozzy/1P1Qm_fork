@@ -12,17 +12,17 @@ To test saved run:
 
 
 **If you use the code please cite:**
->@article{Ngairangbam:2021yma,
-    author = "Ngairangbam, Vishal S. and Spannowsky, Michael and Takeuchi, Michihisa",
-    title = "{Anomaly detection in high-energy physics using a quantum autoencoder}",
-    eprint = "2112.04958",
-    archivePrefix = "arXiv",
-    primaryClass = "hep-ph",
-    reportNumber = "OU-HET-1125, IPPP/21/54",
-    doi = "10.1103/PhysRevD.105.095004",
-    journal = "Phys. Rev. D",
-    volume = "105",
-    number = "9",
-    pages = "095004",
-    year = "2022"
+>@article{Ngairangbam:2021yma,\
+    author = "Ngairangbam, Vishal S. and Spannowsky, Michael and Takeuchi, Michihisa",\
+    title = "{Anomaly detection in high-energy physics using a quantum autoencoder}",\
+    eprint = "2112.04958",\
+    archivePrefix = "arXiv",\
+    primaryClass = "hep-ph",\
+    reportNumber = "OU-HET-1125, IPPP/21/54",\
+    doi = "10.1103/PhysRevD.105.095004",\
+    journal = "Phys. Rev. D",\
+    volume = "105",\
+    number = "9",\
+    pages = "095004",\
+    year = "2022"\
 }
