@@ -29,6 +29,8 @@ class H5IterableDataset(IterableDataset):
 
         Yields:
             torch.Tensor: A batch of data samples.
+        Notes:
+            - Ignore this class, superseded by CASEJetDataset
         """
         self.data_dir = data_dir
         self.data_key = data_key
@@ -41,7 +43,6 @@ class H5IterableDataset(IterableDataset):
         
         for file_path in self.file_paths:
             with h5py.File(file_path, 'r') as file:
-                 # Optionally, apply scaling to the last feature across all samples
                 data = file[self.data_key][:,:self.num_particles,:] # Read up to num_particles particles per event, h5 file contains 25 particles per event
                 pt_index=ut.getIndex('particle','pt')
                 scaler = MinMaxScaler(feature_range=(0, np.pi-self.epsilon))
