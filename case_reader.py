@@ -7,7 +7,7 @@ Description: This script contains the data loader classes for the Delphes Datase
 '''
 
 import os,h5py,glob
-os.environ["PYTHONPATH"]='/work/abal/qae_hep/utils/'
+os.environ["PYTHONPATH"]='/work/abal/qae_hep/'
 import helpers.utils as ut
 
 import numpy as np
