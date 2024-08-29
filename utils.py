@@ -1,11 +1,7 @@
 import os
-import multiprocessing
-import sys
 import pickle
-
-import matplotlib.pyplot as plt
 import numpy as np
-import networkx as nx
+
 pwd= os.getcwd()
 
 
