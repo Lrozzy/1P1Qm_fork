@@ -2,7 +2,7 @@
 
 Date: August 2024
 Author: Aritra Bal, ETP
-Description: This script contains the data loader classes for the Delphes Datasets derived from the CASE analysis EXO-22-026
+Description: This script contains the data loader classes for the Delphes Datasets derived from the CASEDelphes analysis EXO-22-026
 
 '''
 
@@ -10,7 +10,7 @@ import os,h5py,glob
 os.environ["PYTHONPATH"]='/work/abal/qae_hep/'
 import helpers.utils as ut
 
-import numpy as np
+from pennylane import numpy as np
 import pandas as pd
 
 from sklearn.preprocessing import MinMaxScaler
@@ -21,7 +21,7 @@ import torch
 from torch.utils.data import IterableDataset, DataLoader
 
 class H5IterableDataset(IterableDataset):
-    def __init__(self, data_dir:str=ut.path_dict['QCD_train'], data_key:str='eventFeatures',max_samples:int=1e6,epsilon=1.0e-4, num_particles=5):
+    def __init__(self, data_dir:str=ut.path_dict['QCD_train'], data_key:str='eventFeatures',max_samples:int=5e4,epsilon=1.0e-4, num_particles=5):
         """
         Args:
             data_dir (str): Directory containing the .h5 files.
@@ -30,7 +30,7 @@ class H5IterableDataset(IterableDataset):
         Yields:
             torch.Tensor: A batch of data samples.
         Notes:
-            - Ignore this class, superseded by CASEJetDataset
+            - Ignore this class, superseded by CASEDelphesJetDataset
         """
         self.data_dir = data_dir
         self.data_key = data_key
@@ -38,9 +38,9 @@ class H5IterableDataset(IterableDataset):
         self.max_samples = max_samples
         self.epsilon=epsilon
         self.num_particles=num_particles
+        self.batch_counter=0
     def __iter__(self):
         sample_counter=0
-        
         for file_path in self.file_paths:
             with h5py.File(file_path, 'r') as file:
                 data = file[self.data_key][:,:self.num_particles,:] # Read up to num_particles particles per event, h5 file contains 25 particles per event
@@ -63,16 +63,32 @@ class H5IterableDataset(IterableDataset):
 
                 # Stop yielding if we've reached the max_samples
                 if self.max_samples is not None and sample_counter >= self.max_samples:
-                    break
+                    return # don't use break here
 
-class CASEJetDataset(IterableDataset):
-    def __init__(self, filelist:list[str]=None, batch_size:int=32, data_key='jetConstituentsList',input_shape:tuple[int]=(10, 3),epsilon:float=1.0e-4):
+class CASEDelphesJetDataset(IterableDataset):
+    def __init__(self, filelist:list[str]=None, batch_size:int=32, max_samples:int=5e4, data_key='jetConstituentsList',input_shape:tuple[int]=(10, 3),epsilon:float=1.0e-4,train:bool=True):
+        super().__init__()
         self.filelist = filelist
         self.batch_size = batch_size
         self.input_shape = input_shape
         self.pt_index=ut.getIndex('particle','pt')
+        self.eta_index=ut.getIndex('particle','eta')
+        self.phi_index=ut.getIndex('particle','phi')
+        self.max_samples = max_samples
         self.epsilon=epsilon
         self.data_key=data_key
+        self.train=train
+        self.batch_counter=0
+    
+    def rescale(self, data, min=0., max=1., epsilon=1.0e-4):
+        data_shape = data.shape
+        max-=epsilon
+        #print(f"pt_index: {self.pt_index}, eta_index: {self.eta_index}, phi_index: {self.phi_index}")
+        scaler = MinMaxScaler(feature_range=(min, max))
+        data_reshaped = data.flatten()[:, np.newaxis]
+        data_scaled = scaler.fit_transform(data_reshaped)
+        return data_scaled.reshape(data_shape[0], data_shape[1])
+    
     def load_and_preprocess_file(self, file_path):
         '''
         Args: 
@@ -81,33 +97,37 @@ class CASEJetDataset(IterableDataset):
             np.ndarray: Stacked data from both jets.
             np.ndarray: Stacked truth labels.
         '''
+        
         with h5py.File(file_path, 'r') as file:
             # Read data of shape (N,2,100,3) where N is the number of events, 2 is the number of jets, 100 is the number of particles and 3 is the (eta,phi,pt) of each particle
-            jet_pxpypz = np.array(file[self.data_key][:,:, :self.input_shape[0], :]) # because input_shape[0] is the number of particles
+            jet_etaphipt = np.array(file[self.data_key][:,:, :self.input_shape[0], :]) # because input_shape[0] is the number of particles
+            
             try:
                 truth_label = np.array(file['truth_label'][()])
             except:
-                print("Truth labels not found in file. Inferring")
-                if 'qcd'.casefold() in file_path.casefold(): # Case-insensitive search
-                    print("Inferred --> QCD")
-                    truth_label = np.zeros(jet_pxpypz.shape[0])
+                #print("Truth labels not found in file. Inferring")
+                if 'qcd'.casefold() in file_path.casefold(): # CASEDelphes-insensitive search
+                    #print("Inferred --> QCD. Setting label to 0")
+                    truth_label = np.zeros(jet_etaphipt.shape[0])
                 else:
-                    print("Inferred --> non-QCD")
-                    truth_label = np.ones(jet_pxpypz.shape[0])
+                    #print("Inferred --> non-QCD. Setting label to 1")
+                    truth_label = np.ones(jet_etaphipt.shape[0])
         
-        stacked_data = np.reshape(jet_pxpypz,newshape=[-1, jet_pxpypz.shape[2], jet_pxpypz.shape[3]])
+        stacked_data = np.reshape(jet_etaphipt,newshape=[-1, jet_etaphipt.shape[2], jet_etaphipt.shape[3]])
         # NOTE: arg newshape is deprecated in numpy>=2.10.0
         stacked_labels = np.concatenate([truth_label, truth_label], axis=0)
         
-        scaler = MinMaxScaler(feature_range=(0, np.pi-self.epsilon))
-        data_shape = stacked_data.shape
-        data_reshaped = stacked_data[:, :, self.pt_index].flatten()[:, np.newaxis]
-        data_scaled = scaler.fit_transform(data_reshaped)
-        stacked_data[:, :, -1] = data_scaled.reshape(data_shape[0], data_shape[1])
+        stacked_data[:, :, self.pt_index] = self.rescale(stacked_data[:, :, self.pt_index], min=0., max=1.0, epsilon=self.epsilon)
+        stacked_data[:, :, self.eta_index] = self.rescale(stacked_data[:, :, self.eta_index], min=0., max=np.pi, epsilon=self.epsilon)
+        stacked_data[:, :, self.phi_index] = self.rescale(stacked_data[:, :, self.phi_index], min=-np.pi, max=np.pi, epsilon=self.epsilon)
         
         return stacked_data, stacked_labels
-
+    #def __len__(self):
+    #    return self.batch_counter
+    
     def __iter__(self):
+        sample_counter=0
+        #self.batch_counter=0
         for file_path in self.filelist:
             data, labels = self.load_and_preprocess_file(file_path)
             
@@ -119,20 +139,36 @@ class CASEJetDataset(IterableDataset):
             
             # Yield data in batches
             for i in range(0, len(data), self.batch_size):
+                if sample_counter >= self.max_samples:
+                    return
+                
                 end = i + self.batch_size
                 if end > len(data):
                     end = len(data)
+                
                 batch_data = data[i:end]
                 batch_labels = labels[i:end]
                 
                 # Convert data to PyTorch tensors before yielding
                 batch_data = torch.from_numpy(batch_data).float()
                 batch_labels = torch.from_numpy(batch_labels).float() # Assuming labels are floats
-                
-                yield batch_data, batch_labels
+                sample_counter += batch_data.shape[0]
+                #self.batch_counter+=1
+                if self.train:
+                    yield np.array(batch_data,requires_grad=False)
+                else:
+                    yield np.array(batch_data,requires_grad=False), np.array(batch_labels,requires_grad=False)
 
-### Step 2: Create the DataLoader
-def CASEDataLoader(filelist:list[str]=None,batch_size:int=128, input_shape:tuple[int]=(100, 3)):
+# def collate_fn(samples):
+#     if type(samples[0])==tuple:
+#         X,y=[],[]
+#         for item in samples: X.append(item[0]),y.append(item[1])
+#         X,y=np.array(X),np.array(y).flatten()
+#         return X,y
+#     else: 
+        # return np.array(samples,requires_grad=False)
+    
+def CASEDelphesDataLoader(filelist:list[str]=None,batch_size:int=128, input_shape:tuple[int]=(100, 3),train:bool=True,max_samples:int=5e4):
     '''
     Args:
         filelist (list[str]): List of file paths to the .h5 files containing the data.
@@ -142,5 +178,6 @@ def CASEDataLoader(filelist:list[str]=None,batch_size:int=128, input_shape:tuple
     Returns:
         DataLoader: Torch DataLoader object that yields batches of data.
     '''
-    dataset = CASEJetDataset(filelist=filelist, batch_size=batch_size, input_shape=input_shape)
+    print(f"Will read only first {input_shape[0]} particles per jet")
+    dataset = CASEDelphesJetDataset(filelist=filelist, batch_size=batch_size, input_shape=input_shape,train=train,max_samples=max_samples)
     return DataLoader(dataset, batch_size=None)  # None for batch_size since batching is managed by the dataset
