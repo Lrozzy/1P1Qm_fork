@@ -27,6 +27,8 @@ parser.add_argument('--train-file',default='sample_bg_morestat.csv')
 parser.add_argument('--test',default=False,action='store_true')
 parser.add_argument('--path',default='',type=str)
 parser.add_argument('--test-device',default='default.qubit')
+parser.add_argument('--desc',default='Training run')
+
 args=parser.parse_args()
 
 args.non_trash=args.wires-args.trash_qubits
@@ -89,9 +91,9 @@ def batch_semi_classical_cost(weights,inputs=None,quantum_cost=None,return_fid=F
         #    cost.append(1-fid[-1])
         fid=quantum_cost(weights,inputs)
         cost=1.-fid
-        return np.array(cost).mean(),np.array(fid).mean()
+        return np.array(100.*cost).mean(),np.array(100.*fid).mean()
     # the minus sign is to maximize the fidelity between the trash and reference states - which implies that the output and input states are close to each other
-    batched_average_cost=np.array(1-quantum_cost(weights,inputs)).mean()#np.array([-quantum_cost(weights,item) for item in inputs]).mean()
+    batched_average_cost=100.*(np.array(1-quantum_cost(weights,inputs)).mean())#np.array([-quantum_cost(weights,item) for item in inputs]).mean()
     return batched_average_cost
 
 
@@ -111,40 +113,15 @@ class Trainer(object):
         self.current_weights=self.init_weights
         self.metric_tensor=None
         #self.optim=qml.QNGOptimizer(lr,approx='diag',lam=10e-12)# Previously had the deprecated argument diag_approx=True
-        self.optim=qml.AdamOptimizer()# Previously had the deprecated argument diag_approx=True
+        self.optim=qml.AdamOptimizer(stepsize=lr)# Previously had the deprecated argument diag_approx=True
         self.quantum_loss=batch_semi_classical_cost
         #self.setup_quantum()
-        print (f'Performing quantum gradient with: {self.optim}  Learning rate: {lr}')
+        print (f'Performing Adam optimization with: {self.optim}  Learning rate: {lr}')
         print ('Backend:',self.backend,'\n')
-        
-    # def setup_quantum(self):
-    #     # print ('Setting up quantum training procedure!')
-    #     # obs=[qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires])]
-    #     # coeffs=[1.]
-        
-        
-    #     # self.hamiltonian=qml.Hamiltonian(coeffs,obs)
-    #     #self.quantum_cost=self.model#qml.ExpValCost(self.model,self.hamiltonian,dev,optimize=True)
-    #     #self.metric_tensor=qml.metric_tensor(self.model,approx='diag')
-    #     n=self.init_weights.flatten().shape[0]
-    #     diag_reg=np.zeros((n,n))
-    #     np.fill_diagonal(diag_reg,self.optim.lam)
-    #     self.diag_reg=(diag_reg)
-    #     self.loss_fn=batch_semi_classical_cost
-    #@qml.qnode(dev,interface=args.backend)
-    #def loss_fn(self,weights, inputs=None):
-    #    return np.array([-self.model(weights,item) for item in inputs]).mean()
     
     def iteration(self,data,train=False):
         if train:
-            #grad,cost=self.optim.compute_grad(self.quantum_loss,[self.current_weights],dict(inputs=data,quantum_cost=self.quantum_cost))
-            #self.metric_tensor=lambda p:qml.metric_tensor(self.model,approx='diag')(p,data)
-            #self.optim.metric_tensor = np.mean([self.metric_tensor(self.current_weights,inputs=item) for item in data], axis=0) + self.diag_reg
-            #self.optim.metric_tensor=(np.mean([self.metric_tensor(self.current_weights,inputs=item) for item in data],axis=0)+self.diag_reg)
-            #self.current_weights=self.optim.apply_grad(grad[0],self.current_weights)
             self.current_weights, cost = self.optim.step_and_cost(self.quantum_loss,self.current_weights,inputs=data,quantum_cost=self.model)
-            # Update current weights
-            #self.current_weights = grad
             return float(cost)
         else: 
             cost,fid=self.quantum_loss(self.current_weights,inputs=data,quantum_cost=self.model,return_fid=True)
@@ -160,21 +137,20 @@ class Trainer(object):
             else: name='ep{:02}.pickle'.format(epoch)
         if 'trained' not in name: save_dir=checkpoint_dir
         Pickle({'weights':self.current_weights},name,path=save_dir)
-            
+
 
 @qml.qnode(dev,interface=args.backend)
 def circuit(weights,inputs=None):
-
     # State preparation for all wires
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
     # State preparation for all wires
     for w in auto_wires:
         # Variables named according to spherical coordinate system, it's easier to understand :)
-        #import pdb;pdb.set_trace()
+        
         zenith = inputs[:,w, index['eta']] # corresponding to eta
         azimuth = inputs[:,w, index['phi']] # corresponding to phi
         radius = inputs[:,w, index['pt']] # corresponding to pt
-        #import pdb;pdb.set_trace()
+        
         #print('HAA')
         # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
         qml.RY(radius * zenith, wires=w)   
@@ -182,11 +158,13 @@ def circuit(weights,inputs=None):
         #qml.Rot( 0, radius * zenith, radius * azimuth,wires=w)
     # QAE Circuit
     
-    for item,i in zip(weights,auto_wires):
-        qml.RX(item/2.,wires=[i]) # change from RY to RX rotation for the actual trainable weights
-        
+    
     for item in two_comb_wires: 
         qml.CNOT(wires=item)
+    
+    for phi,theta,omega,i in zip(weights[:N],weights[N:2*N],weights[2*N:],auto_wires):
+        qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+        
     
     # SWAP test to measure fidelity
     qml.Hadamard(ancillary_wires)
@@ -205,15 +183,17 @@ def circuit(weights,inputs=None):
 #     return qml.expval(hamiltonian)
     #return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
 if args.train:
-    init_weights=np.random.uniform(0,np.pi,size=(len(auto_wires),), requires_grad=True)
+    train_max_n=1e3
+    valid_max_n=1e2
+    init_weights=np.random.uniform(0,np.pi,size=(len(auto_wires)*3,), requires_grad=True)
     if args.save:
         Pickle(args,'args',path=save_dir)
         with open(os.path.join(save_dir,'args.txt'),'w+') as f:
             f.write(repr(args))
     train_filelist=sorted(glob.glob(ut.path_dict['QCD_train']+'/*.h5'))
     val_filelist=sorted(glob.glob(ut.path_dict['QCD_test']+'/*.h5'))
-    train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist,batch_size=args.batch_size,input_shape=(len(auto_wires),3),train=True,max_samples=2e5)
-    val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist,batch_size=args.batch_size,input_shape=(len(auto_wires),3),train=False,max_samples=1e4) 
+    train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist,batch_size=args.batch_size,input_shape=(len(auto_wires),3),train=True,max_samples=train_max_n)
+    val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist,batch_size=args.batch_size,input_shape=(len(auto_wires),3),train=False,max_samples=valid_max_n) 
     
     
     
@@ -223,54 +203,59 @@ if args.train:
     
     history={'train':[],'val':[],'accuracy':[]}
     first_draw=True
-    logger.debug(f"Training started at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
+    logger.info(f"Training started at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
+    logger.info(f'Epochs: {args.epochs} | Learning rate: {args.lr} | Batch size: {args.batch_size} \nBackend: {args.backend} | Wires: {args.wires} | Trash qubits: {args.trash_qubits} | Shots: {args.shots} \n')    
+    logger.info(f'Additional information: {args.desc}')
     abs_start=time.time()
     try:
-          
-        for n_epoch in range(args.epochs+1):
+        
+        for n_epoch in tqdm(range(args.epochs+1)):
             sample_counter=0
             batch_yield=0
             #if n_epoch !=0:
             losses=0.
+            if (n_epoch>4):
+                if(abs(np.mean(history['val'][-3:])-np.mean(history['val'][-4]))<0.01):
+                    print("No improvement over last 3 epochs. Early stopping!")
+                    trainer.save(n_epoch,save_dir,name='trained_model.pickle')
+                    break
             
             if n_epoch>0:
                 print("Start Training")  
                 start=round(time.time(),2)
                 
-                for data in tqdm(train_loader):
-                    #print (data)
+                for data in tqdm(train_loader,total=int(train_max_n/args.batch_size)):
                     sample_counter+=data.shape[0]
                     batch_yield+=1
                     loss=trainer.iteration(data,train=True)
                     losses+=loss
                 end=round(time.time(),2)
                 train_loss=losses/batch_yield
-                #else: train_loss=float('NaN')
-            
-                print ('Validating!')
+                trainer.print_params('Current parameters!\n\n')
+                print ('Now validating!')
             
             else:
                 print ('Running initial validation pass')
             val_loss=0.
             val_batch_yield=0
-            for data,label in tqdm(val_loader):
+            for data,label in tqdm(val_loader,total=int(valid_max_n/args.batch_size)):
                 loss,batch_fid=trainer.iteration(data,train=False)
                 val_loss+=loss
                 val_batch_yield+=1
             val_loss=val_loss/val_batch_yield
             #print (f'Epoch {n_epoch}: Train Loss:{train_loss} Val loss: {val_loss}')
             if n_epoch>0:
-                logger.debug(f'Epoch {n_epoch}: Network with {len(auto_wires)} input qubits trained on {sample_counter} samples in {batch_yield} batches')
-                logger.debug(f'Epoch {n_epoch}: Train Loss = {train_loss:.3f} | Val loss = {val_loss:.3f} \n Time taken = {end-start:.1f} seconds \n\n')
-                trainer.print_params('Current parameters!')
+                logger.info(f'Epoch {n_epoch}: Network with {len(auto_wires)} input qubits trained on {sample_counter} samples in {batch_yield} batches')
+                logger.info(f'Epoch {n_epoch}: Train Loss = {train_loss:.3f} | Val loss = {val_loss:.3f} \n Time taken = {end-start:.3f} seconds \n\n')
+                
                 history['train'].append(train_loss)
 
             else:
-                logger.debug(f'Initial validation pass completed')
-                logger.debug(f'Epoch {n_epoch} (No training performed): Val loss = {val_loss:.3f} \n\n')
+                logger.info(f'Initial validation pass completed')
+                logger.info(f'Epoch {n_epoch} (No training performed): Val loss = {val_loss:.3f} \n\n')
             history['val'].append(val_loss)
             if args.save:
-                if n_epoch==args.epochs:
+                if (n_epoch==args.epochs):
                     name='trained_model.pickle'
                 elif n_epoch==0:
                     name='init_weights.pickle'
@@ -278,10 +263,12 @@ if args.train:
                     name=None
                 trainer.save(n_epoch,save_dir,name=name)
     except KeyboardInterrupt:
-        pass
+        print("WHYYYYY")
+        print("DON'T PRESS CTRL+C AGAIN. I'M TRYING TO SAVE THE CURRENT MODEL AND WRITE TO LOG!") 
+        trainer.save(n_epoch,save_dir,name='aborted_weights.pickle')
+        trainer.print_params('Training aborted. Current parameters are: ')
     finally:
-        logger.debug('Training completed with the following parameters:')
-        logger.debug(f'Epochs: {n_epoch} | Learning rate: {args.lr} | Batch size: {args.batch_size} \nBackend: {args.backend} | Wires: {args.wires} | Trash qubits: {args.trash_qubits} | Shots: {args.shots} \n')
+        logger.info('Training completed with the following parameters:')
         trainer.print_params('Trained parameters:')
         print (history)
         if args.save:
@@ -290,71 +277,15 @@ if args.train:
             fig,axes=plt.subplots(figsize=(15,12))
             axes.plot(np.arange(done_epochs),history['train'],label='train',linewidth=2)
             axes.plot(np.arange(done_epochs+1),history['val'],label='val',linewidth=2)
-            #if len(history['accuracy'])==done_epochs+1:
-            #    axes.plot(np.arange(done_epochs),history['accuracy'],label='val accuracy',linewidth=2)
             axes.set_xlabel('Epochs',size=25)
-            axes.set_ylabel('$1-<T|F>$',size=25)
+            axes.set_ylabel('$1-<T|F> $(in %)',size=25)
             axes.set_xticks(np.arange(0,done_epochs+1,5))
             axes.legend(prop={'size':25})
     
             axes.tick_params(labelsize=20)
             fig.savefig(os.path.join(save_dir,'history'))
             abs_end=time.time()
-            logger.debug(f"Training finished at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
-            logger.debug(f"Total time taken including all overheads: {abs_end-abs_start:.2f} seconds")
-    sys.exit()
-
-if args.test:
-    curr_args=args
-    print ('Testing with model:',args.path)
-    history=Unpickle('history',path=args.path)
-    #print (history)
-    val_loss=history['val']
-    epoch=np.argmin(val_loss)
-    print (epoch,val_loss[epoch])
-    if epoch<10:
-        filename='0'+str(epoch)
-    else: filename=str(epoch)
-    model_path=os.path.join(args.path,'ep'+filename+'.pickle')
-    print ('Model path:',model_path)
-    path=args.path
-    args=Unpickle('args',path=args.path)
-    print ('Loaded args:',args)
-
-    dictionary=Unpickle(model_path)
-    weights=dictionary['weights']
-
-    # import numpy as nnp
-    #     #init_weights=weights
-    # all_data=get_data(train=False,combined_signal=False,keys=args.keys,
-    #                   train_file=args.train_file,return_splitted=True,scale=True,bg_only=True)
+            logger.info(f"Training finished at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
+            logger.info(f"Total time taken including all overheads: {abs_end-abs_start:.2f} seconds")
     
-
-    # store_dict={}
-    # i=0
-        
-    # for key,val in all_data.items():
-    #     if type(val)!= np.ndarray:
-    #         store_dict[key]=val
-    #         continue
-       
-        
-    
-    #     fid=[]
-    #     y=[]
-    #     print ('Testing: ',key,val.shape)
-    #     for item in tqdm(val):
-    #         fid.append(autoenc(weights,item))
-            
-    #     fid=nnp.array(fid)
-    #     print (fid.shape,type(fid))
-    #     store_dict[key]=fid
-    #     i+=1
-    # print_events(store_dict,name='store dict')
-    
-    # Pickle(store_dict,'test' if curr_args.test_device=='default.qubit' else 'test_'+'_'.join(curr_args.test_device.split('.')),path=path)
-    sys.exit()
-        
-
-
 
