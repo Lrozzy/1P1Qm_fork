@@ -1,4 +1,4 @@
-import numpy as np
+import pickle
 
 def getIndex(which:str='particle',feat:str=None)->int:
     if which=='particle':
@@ -15,6 +15,10 @@ def getIndex(which:str='particle',feat:str=None)->int:
         idx=-1
     return idx
 
+def Unpickle(path=None):
+    with open(path,'rb') as f:
+        return_object=pickle.load(f)
+    return return_object
 
 path_dict:dict[str:str]={'QCD_train':'/storage/9/abal/CASE/delphes/qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/train/',
            'QCD_test':'/storage/9/abal/CASE/delphes/qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/test/',
@@ -23,6 +27,7 @@ path_dict:dict[str:str]={'QCD_train':'/storage/9/abal/CASE/delphes/qcd_sqrtshatT
            'grav_2p5_narrow':'/storage/9/abal/CASE/delphes/grav_2p5_na/',
            'grav_1p5_narrow':'/storage/9/abal/CASE/delphes/grav_1p5_na/',
            'grav_3p5_narrow':'/storage/9/abal/CASE/delphes/grav_3p5_na/',
+            'grav_4p5_narrow':'/storage/9/abal/CASE/delphes/grav_4p5_na/',
            'grav_3p5_broad':'/storage/9/abal/CASE/delphes/grav_3p5_br/',
            'grav_2p5_broad':'/storage/9/abal/CASE/delphes/grav_2p5_br/',
            'grav_1p5_broad':'/storage/9/abal/CASE/delphes/grav_1p5_br/',
