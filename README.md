@@ -1,5 +1,7 @@
 # Anomaly detection in high-energy physics using a quantum autoencoder
-Authors: Aritra Bal (KIT Karlsruhe), Benedikt Maier (Imperial College, London)
+
+### Authors: Aritra Bal (KIT Karlsruhe) and Benedikt Maier (Imperial College, London)
+
 Derived using the methodology of [arxiv: 2112.04958](https://arxiv.org/abs/2112.04958).
 
 To train the autoencoder: 
