@@ -1,28 +1,17 @@
 # Anomaly detection in high-energy physics using a quantum autoencoder
-Quantum autoencoder (QAE) code used in the paper [arxiv: 2112.04958](https://arxiv.org/abs/2112.04958).
-Background and one benchmark signal contained in 'data'.
+Authors: Aritra Bal (KIT Karlsruhe), Benedikt Maier (Imperial College, London)
+Derived using the methodology of [arxiv: 2112.04958](https://arxiv.org/abs/2112.04958).
+
+To train the autoencoder: 
+
+    python3 train.py --train --wires 8 --trash-qubits 5 -b 10 -e 15 --backend autograd --save --seed $RANDOM --lr 0.005 --desc "ENTER YOUR DESCRIPTION HERE" --train_n 5000 --valid_n 1000
 
 
-To train and save default QAE implementation: 
->python auto_qml.py --train --save --train-size 1000 --save-dir ./check_save --trash-qubits 2 
+It is possible to speed up training by using multiple cores. To achieve this, set the device by passing `--device_name lightning.kokkos --num_threads N` in the arguments, where `N` is the number of threads you wish to use.
 
-To test saved run:
->python auto_qml.py --test --path ./check_save/MET_b1pt_lep1pt_lep2pt/train_1000/run_1/
+Notes: 
+- The argument `--seed` (set here to `$RANDOM`) is used to identify a given training run, which is then further described by the text following `--desc`
+- The directories where the input files are stored, and where the results are stored, can be set by modifying `helpers.utils.path_dict` 
+- If `seed = S`, then a new subdirectory is created in the base save directory at the path `/path/to/base/directory/S` and your results are saved there.   
+- The data loader is defined in `case_reader.py`, the quantum circuit architecture is defined in `quantum.architecture` and the loss function is defined in `quantum.losses`. Feel free to modify/add to it!
 
-
-
-**If you use the code please cite:**
->@article{Ngairangbam:2021yma,\
-    author = "Ngairangbam, Vishal S. and Spannowsky, Michael and Takeuchi, Michihisa",\
-    title = "{Anomaly detection in high-energy physics using a quantum autoencoder}",\
-    eprint = "2112.04958",\
-    archivePrefix = "arXiv",\
-    primaryClass = "hep-ph",\
-    reportNumber = "OU-HET-1125, IPPP/21/54",\
-    doi = "10.1103/PhysRevD.105.095004",\
-    journal = "Phys. Rev. D",\
-    volume = "105",\
-    number = "9",\
-    pages = "095004",\
-    year = "2022"\
-}
