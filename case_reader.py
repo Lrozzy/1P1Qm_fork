@@ -11,12 +11,12 @@ os.environ["PYTHONPATH"]='/work/abal/qae_hep/'
 import helpers.utils as ut
 
 from pennylane import numpy as np
-import pandas as pd
+from typing import List
 
 from sklearn.preprocessing import MinMaxScaler
 from utils import print_events
 import __main__
-
+import numpy as nnp
 import torch
 from torch.utils.data import IterableDataset, DataLoader
 
@@ -66,20 +66,25 @@ class H5IterableDataset(IterableDataset):
                     return # don't use break here
 
 class CASEDelphesJetDataset(IterableDataset):
-    def __init__(self, filelist:list[str]=None, batch_size:int=32, max_samples:int=5e4, data_key='jetConstituentsList',input_shape:tuple[int]=(10, 3),epsilon:float=1.0e-4,train:bool=True):
+    def __init__(self, filelist:list[str]=None, batch_size:int=32, max_samples:int=5e4, data_key='jetConstituentsList',\
+                 feature_key='eventFeatures',input_shape:tuple[int]=(10, 3),epsilon:float=1.0e-4,train:bool=True,yield_energies=False):
         super().__init__()
-        self.filelist = filelist
+        self.filelist = sorted(filelist)
         self.batch_size = batch_size
         self.input_shape = input_shape
         self.pt_index=ut.getIndex('particle','pt')
         self.eta_index=ut.getIndex('particle','eta')
         self.phi_index=ut.getIndex('particle','phi')
-        self.max_samples = max_samples
+        self.j1E_index=ut.getIndex('event','j1E')
+        self.j2E_index=ut.getIndex('event','j2E')
+        self.mjj_index=ut.getIndex('event','mJJ')
+        self.max_samples = 2*max_samples
         self.epsilon=epsilon
         self.data_key=data_key
+        self.feature_key=feature_key
         self.train=train
         self.batch_counter=0
-    
+        self.yield_energies=yield_energies
     def rescale(self, data, min=0., max=1., epsilon=1.0e-4):
         data_shape = data.shape
         max-=epsilon
@@ -89,7 +94,8 @@ class CASEDelphesJetDataset(IterableDataset):
         data_scaled = scaler.fit_transform(data_reshaped)
         return data_scaled.reshape(data_shape[0], data_shape[1])
     
-    def load_and_preprocess_file(self, file_path):
+    
+    def load_and_preprocess_file(self, file_path,inference=False):
         '''
         Args: 
             file_path (str): Path to the .h5 file containing the data.
@@ -101,37 +107,61 @@ class CASEDelphesJetDataset(IterableDataset):
         with h5py.File(file_path, 'r') as file:
             # Read data of shape (N,2,100,3) where N is the number of events, 2 is the number of jets, 100 is the number of particles and 3 is the (eta,phi,pt) of each particle
             jet_etaphipt = np.array(file[self.data_key][:,:, :self.input_shape[0], :]) # because input_shape[0] is the number of particles
+            #jet1_energy=np.array(file[self.feature_key][:,self.j1E_index])
+            #jet2_energy=np.array(file[self.feature_key][:,self.j2E_index])
+            mjj=np.array(file[self.feature_key][:,self.mjj_index])
             
             try:
                 truth_label = np.array(file['truth_label'][()])
             except:
                 #print("Truth labels not found in file. Inferring")
-                if 'qcd'.casefold() in file_path.casefold(): # CASEDelphes-insensitive search
+                if 'qcd'.casefold() in file_path.casefold(): # case-insensitive search
                     #print("Inferred --> QCD. Setting label to 0")
                     truth_label = np.zeros(jet_etaphipt.shape[0])
                 else:
                     #print("Inferred --> non-QCD. Setting label to 1")
                     truth_label = np.ones(jet_etaphipt.shape[0])
+        if inference:
+            return jet_etaphipt,mjj,truth_label
         
         stacked_data = np.reshape(jet_etaphipt,newshape=[-1, jet_etaphipt.shape[2], jet_etaphipt.shape[3]])
         # NOTE: arg newshape is deprecated in numpy>=2.10.0
         stacked_labels = np.concatenate([truth_label, truth_label], axis=0)
-        
+        #stacked_energies = np.concatenate([jet1_energy, jet2_energy], axis=0)
         stacked_data[:, :, self.pt_index] = self.rescale(stacked_data[:, :, self.pt_index], min=0., max=1.0, epsilon=self.epsilon)
         stacked_data[:, :, self.eta_index] = self.rescale(stacked_data[:, :, self.eta_index], min=0., max=np.pi, epsilon=self.epsilon)
         stacked_data[:, :, self.phi_index] = self.rescale(stacked_data[:, :, self.phi_index], min=-np.pi, max=np.pi, epsilon=self.epsilon)
         
-        return stacked_data, stacked_labels
-    #def __len__(self):
-    #    return self.batch_counter
+        return stacked_data, stacked_labels#,stacked_energies
     
+    def load_for_inference(self):
+        self.max_samples = self.max_samples//2
+        mjj_array=[]
+        while len(mjj_array)<self.max_samples:
+            for i,file_path in enumerate(self.filelist):
+                jet_etaphipt,mjj,truth_label= self.load_and_preprocess_file(file_path,inference=True)
+                if i==0:
+                    mjj_array=mjj
+                    jet_array=jet_etaphipt
+                    truth_labels=truth_label
+                else:
+                    mjj_array=np.concatenate([mjj_array,mjj],axis=0)
+                    jet_array=np.concatenate([jet_array,jet_etaphipt],axis=0)
+                    truth_labels=np.concatenate([truth_labels,truth_label],axis=0)
+                if len(mjj_array)>=self.max_samples:
+                    break
+        jet_array=jet_array[:self.max_samples]
+        mjj_array=mjj_array[:self.max_samples]
+        truth_labels=truth_labels[:self.max_samples]
+        return jet_array[:,0,:,:],jet_array[:,1,:,:],mjj_array,truth_labels
+
     def __iter__(self):
         sample_counter=0
         #self.batch_counter=0
         for file_path in self.filelist:
             data, labels = self.load_and_preprocess_file(file_path)
+            # Shuffle the data from this file only if training on a per-jet basis, otherwise it becomes necessary to preserve the order of jets
             
-            # Shuffle the data from this file
             indices = np.arange(data.shape[0])
             np.random.shuffle(indices)
             data = data[indices]
@@ -148,12 +178,17 @@ class CASEDelphesJetDataset(IterableDataset):
                 
                 batch_data = data[i:end]
                 batch_labels = labels[i:end]
+                #batch_jet_energy = jet_energy[i:end]
                 
                 # Convert data to PyTorch tensors before yielding
                 batch_data = torch.from_numpy(batch_data).float()
                 batch_labels = torch.from_numpy(batch_labels).float() # Assuming labels are floats
+                #batch_jet_energy = torch.from_numpy(batch_jet_energy).float()
+                
                 sample_counter += batch_data.shape[0]
                 #self.batch_counter+=1
+                #if self.train and self.yield_energies:
+                #    yield np.array(batch_data,requires_grad=False), np.array(batch_jet_energy,requires_grad=False)
                 if self.train:
                     yield np.array(batch_data,requires_grad=False)
                 else:
@@ -180,4 +215,32 @@ def CASEDelphesDataLoader(filelist:list[str]=None,batch_size:int=128, input_shap
     '''
     print(f"Will read only first {input_shape[0]} particles per jet")
     dataset = CASEDelphesJetDataset(filelist=filelist, batch_size=batch_size, input_shape=input_shape,train=train,max_samples=max_samples)
+    
     return DataLoader(dataset, batch_size=None)  # None for batch_size since batching is managed by the dataset
+def rescale_and_reshape(data: list[np.ndarray]):
+    '''
+    Args: 
+        data (np.ndarray): Data of shape [N,2,n_inputs,3] to be rescaled and reshaped.
+    Returns:
+        np.ndarray,np.ndarray: Data rescaled and reshaped for jets 1 and 2
+        Note that the rescaling is performed first, taking both jets of an event into account and only then is it reshaped into 2 separate jets
+    '''
+    pt_index=ut.getIndex('particle','pt')
+    eta_index=ut.getIndex('particle','eta')
+    phi_index=ut.getIndex('particle','phi')
+    data_len=nnp.cumsum([arr.shape[0] for arr in data])
+    stacked_data = nnp.concatenate(data, axis=0)
+    stacked_data[:, :, pt_index] = rescale(stacked_data[:, :, pt_index], min=0., max=1.0, epsilon=1.0e-4)
+    stacked_data[:, :, eta_index] = rescale(stacked_data[:, :, eta_index], min=0., max=nnp.pi, epsilon=1.0e-4)
+    stacked_data[:, :, phi_index] = rescale(stacked_data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=1.0e-4)
+    #import pdb;pdb.set_trace()
+    return nnp.split(stacked_data, data_len)[:-1]
+
+def rescale(data, min=0., max=1., epsilon=1.0e-4):
+    data_shape = data.shape
+    max-=epsilon
+    #print(f"pt_index: {self.pt_index}, eta_index: {self.eta_index}, phi_index: {self.phi_index}")
+    scaler = MinMaxScaler(feature_range=(min, max))
+    data_reshaped = data.flatten()[:, np.newaxis]
+    data_scaled = scaler.fit_transform(data_reshaped)
+    return data_scaled.reshape(data_shape[0], data_shape[1])
