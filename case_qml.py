@@ -18,6 +18,9 @@ parser.add_argument('--train',default=False,action='store_true',help='train netw
 parser.add_argument('--wires',default=4,type=int,help='number of wires/qubits that the circuit needs to process(AB system)')
 parser.add_argument('--trash-qubits',default=1,type=int,help='number of qubits defining the B system, or the reference and trash states!')
 parser.add_argument('--shots',default=5000,type=int)
+parser.add_argument('--train_n',default=100000,type=int)
+parser.add_argument('--valid_n',default=20000,type=int)
+
 parser.add_argument('-b','--batch-size',default=1,type=int)
 parser.add_argument('-e','--epochs',default=20,type=int)
 parser.add_argument('--backend',default='autograd')
@@ -26,9 +29,9 @@ parser.add_argument('--save',default=False,action='store_true')
 parser.add_argument('--train-file',default='sample_bg_morestat.csv')
 parser.add_argument('--test',default=False,action='store_true')
 parser.add_argument('--path',default='',type=str)
-parser.add_argument('--test-device',default='default.qubit')
+parser.add_argument('--device',default='default.qubit')
 parser.add_argument('--desc',default='Training run')
-
+parser.add_argument('--n_threads',type=str,default='1')
 args=parser.parse_args()
 
 args.non_trash=args.wires-args.trash_qubits
@@ -36,7 +39,8 @@ assert args.non_trash>0,'Need strictly positive dimensional compressed represent
 
 import pennylane.numpy as np
 
-
+train_max_n=args.train_n
+valid_max_n=args.valid_n
 
 print(f"args.wires: {args.wires}")
 print(f"args.trash_qubits: {args.trash_qubits}")
@@ -51,9 +55,12 @@ if args.save:
 
 logger.add(os.path.join(save_dir,'logs.log'),rotation='10 MB',backtrace=True,diagnose=True,level='DEBUG', mode="w")
 
-        
+if args.device=='lightning.kokkos':
+    os.environ['OMP_NUM_THREADS']='1'
+    os.environ['OMP_PROC_BIND']='true'
+
 if args.train:
-    dev=qml.device('lightning.kokkos',wires=args.wires+args.trash_qubits+1,shots=args.shots)
+    dev=qml.device(args.device,wires=args.wires+args.trash_qubits+1,shots=args.shots)
     two_comb_wires=list(combinations([i for i in range(args.wires)],2))   
     all_wires=[_ for _ in range(args.wires+args.trash_qubits+1)]
     ancillary_wires=all_wires[-1:]
@@ -105,6 +112,7 @@ def collate_fn(samples):
         return X,y
     else: 
         return np.array(samples,requires_grad=False)
+
 class Trainer(object):
     def __init__(self,model,lr=0.001,backend=None,**kwargs):
         self.model=model
@@ -112,10 +120,8 @@ class Trainer(object):
         self.init_weights=kwargs.get('init_weights')
         self.current_weights=self.init_weights
         self.metric_tensor=None
-        #self.optim=qml.QNGOptimizer(lr,approx='diag',lam=10e-12)# Previously had the deprecated argument diag_approx=True
         self.optim=qml.AdamOptimizer(stepsize=lr)# Previously had the deprecated argument diag_approx=True
         self.quantum_loss=batch_semi_classical_cost
-        #self.setup_quantum()
         print (f'Performing Adam optimization with: {self.optim}  Learning rate: {lr}')
         print ('Backend:',self.backend,'\n')
     
@@ -183,8 +189,7 @@ def circuit(weights,inputs=None):
 #     return qml.expval(hamiltonian)
     #return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
 if args.train:
-    train_max_n=1e3
-    valid_max_n=1e2
+    
     init_weights=np.random.uniform(0,np.pi,size=(len(auto_wires)*3,), requires_grad=True)
     if args.save:
         Pickle(args,'args',path=save_dir)
@@ -224,7 +229,7 @@ if args.train:
                 print("Start Training")  
                 start=round(time.time(),2)
                 
-                for data in tqdm(train_loader,total=int(train_max_n/args.batch_size)):
+                for data in tqdm(train_loader,total=2*int(train_max_n/args.batch_size)):
                     sample_counter+=data.shape[0]
                     batch_yield+=1
                     loss=trainer.iteration(data,train=True)
@@ -238,7 +243,7 @@ if args.train:
                 print ('Running initial validation pass')
             val_loss=0.
             val_batch_yield=0
-            for data,label in tqdm(val_loader,total=int(valid_max_n/args.batch_size)):
+            for data,label in tqdm(val_loader,total=2*int(valid_max_n/args.batch_size)):
                 loss,batch_fid=trainer.iteration(data,train=False)
                 val_loss+=loss
                 val_batch_yield+=1
