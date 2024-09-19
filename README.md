@@ -13,15 +13,15 @@ To train the autoencoder:
 
 The example above runs on multiple cores. We set the device by passing `--device_name lightning.kokkos --num_threads NUM_THREADS` in the arguments, where `NUM_THREADS` is the number of threads you wish to use.
 
-It is possible to use a GPU for accelerated training as well. To do this, change the argument to `--device lightning.gpu`. Note that for GPU acceleration, a GPU with Compute Capability >=7.0 and CUDA Version >= 12.0 is needed. 
+It is possible to use a GPU for accelerated training as well. To do this, change the argument to `--device lightning.gpu`. Note that for GPU acceleration, a GPU with Compute Capability $>=7.0$ and CUDA Version $>= 12.0$ is needed. 
 
-You can use the docker container here to test GPU training:
+You can use the docker container here:
 
     docker pull neutrinoman4/qml-lightning.gpu:latest
 
 
 Notes: 
-- The argument `--seed` (set here to `$RANDOM`) is used to identify a given training run, which is then further described by the text following `--desc`
+- The argument `--seed` (set here to `$RANDOM`) is used to identify a given training run, which is then further described by the text contained in the `--desc` argument.
 - The directories where the input files are stored, and where the results are stored, can be set by modifying `helpers.utils.path_dict` 
 - If `seed = S`, then a new subdirectory is created in the base save directory at the path `/path/to/base/directory/S` and your results are saved there.   
 - The data loader is defined in `case_reader.py`, the quantum circuit architecture is defined in `quantum.architecture` and the loss function is defined in `quantum.losses`. Feel free to modify/add to it!
