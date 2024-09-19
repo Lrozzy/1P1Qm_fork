@@ -6,10 +6,18 @@ Derived using the methodology of [arxiv: 2112.04958](https://arxiv.org/abs/2112.
 
 To train the autoencoder: 
 
-    python3 train.py --train --wires 8 --trash-qubits 5 -b 10 -e 15 --backend autograd --save --seed $RANDOM --lr 0.005 --desc "ENTER YOUR DESCRIPTION HERE" --train_n 5000 --valid_n 1000
+    python3 case_qml.py --train --wires 10 \
+    --trash-qubits 7 -b 250 -e 15 --backend autograd --save --seed ${seed} --lr 0.005 --desc "Using arbitrary 3D rotations and 3x weights" \
+    --train_n 75000 --valid_n 15000 --device lightning.kokkos --n_threads NUM_THREADS
 
 
-It is possible to speed up training by using multiple cores. To achieve this, set the device by passing `--device_name lightning.kokkos --num_threads N` in the arguments, where `N` is the number of threads you wish to use.
+The example above runs on multiple cores. We set the device by passing `--device_name lightning.kokkos --num_threads NUM_THREADS` in the arguments, where `NUM_THREADS` is the number of threads you wish to use.
+
+It is possible to use a GPU for accelerated training as well. To do this, change the argument to `--device lightning.gpu`. Note that for GPU acceleration, a GPU with Compute Capability >=7.0 and CUDA Version >= 12.0 is needed. 
+
+You can use the docker container here:
+    docker pull neutrinoman4/qml-lightning.gpu:latest
+
 
 Notes: 
 - The argument `--seed` (set here to `$RANDOM`) is used to identify a given training run, which is then further described by the text following `--desc`
