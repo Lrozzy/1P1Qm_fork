@@ -16,7 +16,8 @@ The example above runs on multiple cores. We set the device by passing `--device
 It is possible to use a GPU for accelerated training as well. To do this, change the argument to `--device lightning.gpu`. Note that for GPU acceleration, a GPU with Compute Capability >=7.0 and CUDA Version >= 12.0 is needed. 
 
 You can use the docker container here to test GPU training:
-    `docker pull neutrinoman4/qml-lightning.gpu:latest`
+
+    docker pull neutrinoman4/qml-lightning.gpu:latest
 
 
 Notes: 
