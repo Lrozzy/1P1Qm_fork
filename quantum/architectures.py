@@ -7,6 +7,7 @@ from tqdm import tqdm
 import pennylane.numpy as np
 import os,pathlib
 import helpers.utils as ut
+import subprocess
 dev = None
 all_wires=None
 two_comb_wires = None
@@ -55,7 +56,6 @@ def circuit(weights,inputs=None):
         # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
         qml.RY(radius * zenith, wires=w)   
         qml.RZ(radius * azimuth, wires=w)  
-        #qml.Rot( 0, radius * zenith, radius * azimuth,wires=w)
     # QAE Circuit
 
     for phi,theta,omega,i in zip(weights[:N],weights[N:2*N],weights[2*N:],auto_wires):
@@ -70,17 +70,67 @@ def circuit(weights,inputs=None):
         qml.CSWAP(wires=[ancillary_wires[0], ref_wire, trash_wire])
     qml.Hadamard(ancillary_wires)
     return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
-   
+
+def reuploading_circuit(weights,inputs=None):
+    # State preparation for all wires
+    N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
+    # State preparation for all wires
+    # Layer 1
+    for w in auto_wires:
+        # Variables named according to spherical coordinate system, it's easier to understand :)
+        
+        zenith = inputs[:,w, index['eta']] # corresponding to eta
+        azimuth = inputs[:,w, index['phi']] # corresponding to phi
+        radius = inputs[:,w, index['pt']] # corresponding to pt
+        # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
+        qml.RY(zenith, wires=w)   
+        qml.RZ(azimuth, wires=w)  
+    # QAE Circuit
+
+    for phi,theta,omega,i in zip(weights[:N],weights[N:2*N],weights[2*N:3*N],auto_wires):
+        qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+    
+    for item in two_comb_wires: 
+        qml.CNOT(wires=item)
+    
+    # Layer 2
+    for w in auto_wires:
+        # Variables named according to spherical coordinate system, it's easier to understand :)
+        
+        radius = inputs[:,w, index['pt']] # corresponding to pt
+        # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
+        qml.RY(radius*zenith, wires=w)   
+        qml.RZ(radius*azimuth, wires=w)  
+    # QAE Circuit
+
+    for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
+        qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+    
+    for item in two_comb_wires: 
+        qml.CNOT(wires=item)
+    
+
+    # SWAP test to measure fidelity
+    qml.Hadamard(ancillary_wires)
+    for ref_wire,trash_wire in zip(ref_wires,auto_wires[-n_trash_qubits:]):
+        qml.CSWAP(wires=[ancillary_wires[0], ref_wire, trash_wire])
+    qml.Hadamard(ancillary_wires)
+    return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
+
 class QuantumAutoencoder:
-    def __init__(self, wires:int=4,trash_qubits:int=0,dev_name:str='default.qubit',backend_name:str='autograd',test=False,n_threads:str='1'):
+    def __init__(self, wires:int=4,trash_qubits:int=0,dev_name:str='default.qubit',backend_name:str='autograd',test=False):
         initialize(wires=wires,trash_qubits=trash_qubits)
         self.device=set_device(shots=5000,device_name=dev_name)
         self.backend=backend_name
         self.current_weights=None
         self.circuit = None
         if test: self.set_circuit() # Set the circuit for inference
-    def set_circuit(self):
-        self.circuit = qml.QNode(circuit,self.device,interface=self.backend)
+    def set_circuit(self,reuploading=False):
+        if reuploading:
+            print("Using Feature-Reuploading Circuit with 2 layers")
+            self.circuit = qml.QNode(reuploading_circuit,self.device,interface=self.backend)
+        else:
+            self.circuit = qml.QNode(circuit,self.device,interface=self.backend)
     def fetch_circuit(self):
         if self.circuit is None:
             self.set_circuit()
@@ -124,7 +174,8 @@ class QuantumTrainer():
         else: 
             cost,fid=self.quantum_loss(self.current_weights,inputs=data,quantum_cost=self.circuit,return_fid=True)
             return float(cost),float(fid)
-    
+    def is_evictable_job(self):
+        self.is_evictable=True
     def run_training_loop(self,train_loader,val_loader):
         self.print_params('Initial weights: ')
         for n_epoch in tqdm(range(self.epochs+1)):
@@ -153,9 +204,9 @@ class QuantumTrainer():
                 train_loss=losses/batch_yield
                 self.print_params('Current weights: \n\n')
                 print ('Now validating!')
-            
             else:
                 print ('Running initial validation pass')
+            ### Validation pass ###
             val_loss=0.
             val_batch_yield=0
             for data,label in tqdm(val_loader,total=int(self.valid_max_n/self.batch_size)):
@@ -182,6 +233,10 @@ class QuantumTrainer():
                 else:
                     name=None
                 self.save(self.save_dir,name=name)
+                if self.is_evictable:
+                    print ('Will copy over checkpoints')
+                    name='ep{:03}.pickle'.format(self.current_epoch)
+                    subprocess.run(['cp',os.path.join(self.checkpoint_dir,name),os.path.join(self.save_dir,name)])
         return self.history
     
     def print_params(self,prefix=None):

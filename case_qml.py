@@ -3,14 +3,14 @@ import torch,glob,time
 from torch.utils.data import DataLoader,Dataset
 from itertools import combinations
 import helpers.utils as ut
+import helpers.path_setter as ps
 import pennylane as qml
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import case_reader as cr
-from utils import check_dir,print_events,Pickle,Unpickle
 import os,sys,pathlib
 from loguru import logger
-from functools import partial
+
 import datetime
 parser=ArgumentParser(description='select options to train quantum autoencoder')
 parser.add_argument('--seed',default=9999,type=int,help='Some number to index the run')
@@ -45,7 +45,7 @@ valid_max_n=args.valid_n
 print(f"args.wires: {args.wires}")
 print(f"args.trash_qubits: {args.trash_qubits}")
 if args.save:
-    save_dir=os.path.join(ut.path_dict['QAE_save'],str(args.seed))
+    save_dir=os.path.join(ps.path_dict['QAE_save'],str(args.seed))
     pathlib.Path(save_dir).mkdir(parents=True,exist_ok=True)
     checkpoint_dir=os.path.join(save_dir,'checkpoints')
     pathlib.Path(checkpoint_dir).mkdir(parents=True,exist_ok=True)
@@ -55,9 +55,15 @@ if args.save:
 
 logger.add(os.path.join(save_dir,'logs.log'),rotation='10 MB',backtrace=True,diagnose=True,level='DEBUG', mode="w")
 
-if args.device=='lightning.kokkos':
-    os.environ['OMP_NUM_THREADS']='1'
-    os.environ['OMP_PROC_BIND']='true'
+# if (args.device=='lightning.kokkos'):
+#     if ('OMP_NUM_THREADS' not in os.environ.keys()):
+#         os.environ['OMP_NUM_THREADS']=str(args.n_threads)
+#         os.environ['OMP_PROC_BIND']='true'
+if (args.device=='lightning.kokkos'):
+    print(f"Initialized device {args.device} with {os.environ['OMP_NUM_THREADS']} threads")
+    print(f"OMP_PROC_BIND value is : {os.environ['OMP_PROC_BIND']}")
+if (args.device=='lightning.gpu'):
+    print("Using GPU backend")
 
 if args.train:
     dev=qml.device(args.device,wires=args.wires+args.trash_qubits+1,shots=args.shots)
@@ -68,7 +74,7 @@ if args.train:
     auto_wires=all_wires[:args.wires]
     ref_wires=all_wires[args.wires:args.wires+args.trash_qubits] 
 elif args.test:
-    test_args=Unpickle('args',path=args.path)
+    test_args=ut.Unpickle('args',path=args.path)
     dev=qml.device(args.test_device,wires=test_args.wires+test_args.trash_qubits+1,shots=test_args.shots)
     two_comb_wires=list(combinations([i for i in range(test_args.wires)],2))
     all_wires=[_ for _ in range(test_args.wires+test_args.trash_qubits+1)]
@@ -80,7 +86,7 @@ else:
     print ('Select either: --train or --test')
     sys.exit()
     
-index={'eta':ut.getIndex('particle','eta'),'phi':ut.getIndex('particle','phi'),'pt':ut.getIndex('particle','pt')}
+index={'eta':ps.getIndex('particle','eta'),'phi':ps.getIndex('particle','phi'),'pt':ps.getIndex('particle','pt')}
 
 if not args.test: 
     print ('Selected argument namespace: ')
@@ -93,9 +99,6 @@ if not args.test:
 def batch_semi_classical_cost(weights,inputs=None,quantum_cost=None,return_fid=False):
     if return_fid:
         cost,fid=[],[]
-        #for item in inputs:
-        #    fid.append(quantum_cost(weights,item))
-        #    cost.append(1-fid[-1])
         fid=quantum_cost(weights,inputs)
         cost=1.-fid
         return np.array(100.*cost).mean(),np.array(100.*fid).mean()
@@ -142,7 +145,7 @@ class Trainer(object):
             if epoch>100: name = 'ep{:03}.pickle'.format(epoch)
             else: name='ep{:02}.pickle'.format(epoch)
         if 'trained' not in name: save_dir=checkpoint_dir
-        Pickle({'weights':self.current_weights},name,path=save_dir)
+        ut.Pickle({'weights':self.current_weights},name,path=save_dir)
 
 
 @qml.qnode(dev,interface=args.backend)
@@ -152,19 +155,13 @@ def circuit(weights,inputs=None):
     # State preparation for all wires
     for w in auto_wires:
         # Variables named according to spherical coordinate system, it's easier to understand :)
-        
         zenith = inputs[:,w, index['eta']] # corresponding to eta
         azimuth = inputs[:,w, index['phi']] # corresponding to phi
         radius = inputs[:,w, index['pt']] # corresponding to pt
-        
-        #print('HAA')
         # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
         qml.RY(radius * zenith, wires=w)   
         qml.RZ(radius * azimuth, wires=w)  
-        #qml.Rot( 0, radius * zenith, radius * azimuth,wires=w)
-    # QAE Circuit
-    
-    
+        
     for item in two_comb_wires: 
         qml.CNOT(wires=item)
     
@@ -178,31 +175,70 @@ def circuit(weights,inputs=None):
         qml.CSWAP(wires=[ancillary_wires[0], ref_wire, trash_wire])
     qml.Hadamard(ancillary_wires)
     return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
+
+@qml.qnode(dev,interface=args.backend)
+def reuploading_circuit(weights,inputs=None):
+    # State preparation for all wires
+    N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
+    # State preparation for all wires
+    # Layer 1
+    for w in auto_wires:
+        # Variables named according to spherical coordinate system, it's easier to understand :)
+        
+        zenith = inputs[:,w, index['eta']] # corresponding to eta
+        azimuth = inputs[:,w, index['phi']] # corresponding to phi
+        radius = inputs[:,w, index['pt']] # corresponding to pt
+        # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
+        qml.RY(zenith, wires=w)   
+        qml.RZ(azimuth, wires=w)  
+    # QAE Circuit
+
+    for phi,theta,omega,i in zip(weights[:N],weights[N:2*N],weights[2*N:3*N],auto_wires):
+        qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
     
+    for item in two_comb_wires: 
+        qml.CNOT(wires=item)
     
-# def autoenc(weights,inputs=None):    
-#     circuit(weights,inputs=inputs)
-#     obs=[qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires])]
-#     coeffs=np.array([1.])
-#     hamiltonian=qml.Hamiltonian(coeffs,obs)
-#     # returns the expected fidelity between the reference state and the trash state
-#     return qml.expval(hamiltonian)
-    #return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
+    # Layer 2
+    for w in auto_wires:
+        # Variables named according to spherical coordinate system, it's easier to understand :)
+        
+        radius = inputs[:,w, index['pt']] # corresponding to pt
+        # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
+        qml.RY(radius*zenith, wires=w)   
+        qml.RZ(radius*azimuth, wires=w)  
+    # QAE Circuit
+
+    for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
+        qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+    
+    for item in two_comb_wires: 
+        qml.CNOT(wires=item)
+    
+
+    # SWAP test to measure fidelity
+    qml.Hadamard(ancillary_wires)
+    for ref_wire,trash_wire in zip(ref_wires,auto_wires[-args.trash_qubits:]):
+        qml.CSWAP(wires=[ancillary_wires[0], ref_wire, trash_wire])
+    qml.Hadamard(ancillary_wires)
+    return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
+
+
 if args.train:
     
-    init_weights=np.random.uniform(0,np.pi,size=(len(auto_wires)*3,), requires_grad=True)
+    init_weights=np.random.uniform(0,np.pi,size=(len(auto_wires)*6,), requires_grad=True)
     if args.save:
-        Pickle(args,'args',path=save_dir)
+        ut.Pickle(args,'args',path=save_dir)
         with open(os.path.join(save_dir,'args.txt'),'w+') as f:
             f.write(repr(args))
-    train_filelist=sorted(glob.glob(ut.path_dict['QCD_train']+'/*.h5'))
-    val_filelist=sorted(glob.glob(ut.path_dict['QCD_test']+'/*.h5'))
+    train_filelist=sorted(glob.glob(ps.path_dict['QCD_train']+'/*.h5'))
+    val_filelist=sorted(glob.glob(ps.path_dict['QCD_test']+'/*.h5'))
     train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist,batch_size=args.batch_size,input_shape=(len(auto_wires),3),train=True,max_samples=train_max_n)
     val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist,batch_size=args.batch_size,input_shape=(len(auto_wires),3),train=False,max_samples=valid_max_n) 
     
     
     
-    trainer=Trainer(circuit,lr=args.lr,backend=args.backend,init_weights=init_weights)
+    trainer=Trainer(reuploading_circuit,lr=args.lr,backend=args.backend,init_weights=init_weights)
     trainer.print_params('Initialized parameters!')
     #import pdb;pdb.set_trace()
     
@@ -278,7 +314,7 @@ if args.train:
         print (history)
         if args.save:
             done_epochs=len(history['train'])
-            Pickle(history,'history',path=save_dir)
+            ut.Pickle(history,'history',path=save_dir)
             fig,axes=plt.subplots(figsize=(15,12))
             axes.plot(np.arange(done_epochs),history['train'],label='train',linewidth=2)
             axes.plot(np.arange(done_epochs+1),history['val'],label='val',linewidth=2)
