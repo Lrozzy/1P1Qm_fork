@@ -21,7 +21,7 @@ It is possible to use a GPU for accelerated training as well. To do this, change
 
 You can use the docker container here:
 
-    docker pull neutrinoman4/qml-lightning.gpu:latest
+    docker pull neutrinoman4/qml-lightning.gpu:v2.0
 
 
 Notes: 
