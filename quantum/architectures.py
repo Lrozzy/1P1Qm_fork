@@ -236,7 +236,8 @@ class QuantumTrainer():
                 if self.is_evictable:
                     print ('Will copy over checkpoints')
                     name='ep{:03}.pickle'.format(self.current_epoch)
-                    subprocess.run(['cp',os.path.join(self.checkpoint_dir,name),os.path.join(self.save_dir,name)])
+                    
+                    subprocess.run(['xrdcp',os.path.join(self.checkpoint_dir,name),os.path.join(self.save_dir,name)])
         return self.history
     
     def print_params(self,prefix=None):
