@@ -48,7 +48,8 @@ with omp_num_threads(int(args.n_threads)):
     backend_name=args.backend
     device_name=args.device_name
     test_args=ut.Unpickle(os.path.join(save_dir,'args.pickle'))
-    qAE=qc.QuantumAutoencoder(wires=test_args.wires, trash_qubits=test_args.trash_qubits,dev_name=args.device_name,test=True,n_threads=args.n_threads)
+    qAE=qc.QuantumAutoencoder(wires=test_args.wires, trash_qubits=test_args.trash_qubits,dev_name=args.device_name,test=True)
+    qAE.set_circuit(reuploading=True)
     qc.print_training_params()
 
     semi_classical_cost=loss.semi_classical_cost
@@ -97,9 +98,8 @@ with omp_num_threads(int(args.n_threads)):
         qcd_j1_etaphipt,qcd_j2_etaphipt,qcd_mjj,qcd_labels=cr.CASEDelphesJetDataset(filelist=sorted(glob.glob(ps.path_dict['QCD_SR']+'/*.h5')),\
                                                                                 input_shape=(len(qc.auto_wires),3),max_samples=read_n).load_for_inference()
         sig_j1_etaphipt,sig_j2_etaphipt,sig_mjj,sig_labels=cr.CASEDelphesJetDataset(filelist=sorted(glob.glob(ps.path_dict[args.signal]+'/*.h5')),\
-                                                                                input_shape=(len(qc.auto_wires),3),max_samples=read_n).load_for_inference()
-
-        qcd_j1_etaphipt,qcd_j2_etaphipt,sig_j1_etaphipt,qcd_j2_etaphipt=cr.rescale_and_reshape([qcd_j1_etaphipt,qcd_j2_etaphipt,sig_j1_etaphipt,sig_j2_etaphipt])
+                                                                                input_shape=(len(qc.auto_wires),3),max_samples=10000).load_for_inference()
+        qcd_j1_etaphipt,qcd_j2_etaphipt,sig_j1_etaphipt,sig_j2_etaphipt=cr.rescale_and_reshape([qcd_j1_etaphipt,qcd_j2_etaphipt,sig_j1_etaphipt,sig_j2_etaphipt])
         qcd_costs_j1,qcd_fids_j1=qAE.run_inference(qcd_j1_etaphipt,loss_fn=semi_classical_cost)
         sig_costs_j1,sig_fids_j1=qAE.run_inference(sig_j1_etaphipt,loss_fn=semi_classical_cost)
         qcd_costs_j2,qcd_fids_j2=qAE.run_inference(qcd_j2_etaphipt,loss_fn=semi_classical_cost)
@@ -119,7 +119,7 @@ with omp_num_threads(int(args.n_threads)):
         nnp.save(os.path.join(dump_dir,args.signal,'sig_mjj.npy'),sig_mjj)
         
 
-
+    import pdb;pdb.set_trace()
     qcd_fids=nnp.maximum(qcd_fids_j1,qcd_fids_j2)
     sig_fids=nnp.maximum(sig_fids_j1,sig_fids_j2)
     qcd_costs=nnp.minimum(qcd_costs_j1,qcd_costs_j2)
@@ -139,8 +139,8 @@ with omp_num_threads(int(args.n_threads)):
     roc_auc=roc_auc_score(labels,costs)
 
 
-    bins_qcd,edges_qcd=nnp.histogram(qcd_fids,bins=80,range=[96,100])
-    bins_sig,edges_sig=nnp.histogram(sig_fids,bins=80,range=[96,100])
+    bins_qcd,edges_qcd=nnp.histogram(qcd_fids,density=True,bins=200,range=[0,100])
+    bins_sig,edges_sig=nnp.histogram(sig_fids,density=True,bins=200,range=[0,100])
     plt.stairs(bins_qcd,edges_qcd,fill=True,label='QCD',alpha=0.6)
     plt.stairs(bins_sig,edges_sig,fill=False,label=ps.labels[args.signal])
     plt.minorticks_on()

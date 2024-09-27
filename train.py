@@ -1,6 +1,5 @@
 from argparse import ArgumentParser
 import os,pathlib
-
 parser=ArgumentParser(description='select options to train quantum autoencoder')
 parser.add_argument('--seed',default=9999,type=int,help='Some number to index the run')
 parser.add_argument('--train',default=False,action='store_true',help='train network!')
@@ -16,6 +15,7 @@ parser.add_argument('--device_name',default='default.qubit',help='device name fo
     to set the OMP_PROC_BIND and OMP_n_threads environment variables')
 parser.add_argument('--lr',default=0.01,type=float)
 parser.add_argument('--save',default=False,action='store_true')
+parser.add_argument('--evictable',default=False,action='store_true')
 parser.add_argument('--desc',default='Training run')
 parser.add_argument('--n_threads',default='8',type=str)
 args=parser.parse_args()
@@ -68,6 +68,9 @@ device_name=args.device_name
 ### Initialize the quantum autoencoder ##
 qAE=qc.QuantumAutoencoder(wires=args.wires, trash_qubits=args.trash_qubits, dev_name=args.device_name)
 qAE.set_circuit(reuploading=True)
+
+
+
 cost_fn=loss.batch_semi_classical_cost
 qc.print_training_params()
 
@@ -98,7 +101,8 @@ trainer=qc.QuantumTrainer(qAE,lr=args.lr,backend_name=args.backend,init_weights=
                             logger=logger,save=args.save,patience=4,optimizer=optimizer,loss_fn=cost_fn)
 trainer.print_params('Initialized parameters!')
 trainer.set_directories(save_dir)
-
+if args.evictable:
+    trainer.is_evictable_job()
 ### Begin logging ###
 logger.info(f"Training started at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
 logger.info(f'Epochs: {args.epochs} | Learning rate: {args.lr} | Batch size: {args.batch_size} \nBackend: {args.backend} | Wires: {args.wires} | Trash qubits: {args.trash_qubits} | Shots: {args.shots} \n')    
