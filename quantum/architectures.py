@@ -83,8 +83,8 @@ def reuploading_circuit(weights,inputs=None):
         azimuth = inputs[:,w, index['phi']] # corresponding to phi
         radius = inputs[:,w, index['pt']] # corresponding to pt
         # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
-        qml.RY(zenith, wires=w)   
-        qml.RZ(azimuth, wires=w)  
+        qml.RY(radius*zenith, wires=w)   
+        qml.RZ(radius*azimuth, wires=w)  
     # QAE Circuit
 
     for phi,theta,omega,i in zip(weights[:N],weights[N:2*N],weights[2*N:3*N],auto_wires):
@@ -120,7 +120,7 @@ def reuploading_circuit(weights,inputs=None):
 class QuantumAutoencoder:
     def __init__(self, wires:int=4,trash_qubits:int=0,dev_name:str='default.qubit',backend_name:str='autograd',test=False):
         initialize(wires=wires,trash_qubits=trash_qubits)
-        self.device=set_device(shots=5000,device_name=dev_name)
+        self.device=set_device(shots=1000,device_name=dev_name)
         self.backend=backend_name
         self.current_weights=None
         self.circuit = None
@@ -164,6 +164,7 @@ class QuantumTrainer():
         self.optim=optimizer# Previously had the deprecated argument diag_approx=True
         self.quantum_loss=loss_fn
         self.current_epoch=0
+        self.is_evictable=False
         self.history={'train':[],'val':[],'accuracy':[]}
         print (f'Performing optimization with: {self.optim} | Setting Learning rate: {lr}')
         print ('Backend:',self.backend,'\n')
@@ -236,8 +237,10 @@ class QuantumTrainer():
                 if self.is_evictable:
                     print ('Will copy over checkpoints')
                     name='ep{:03}.pickle'.format(self.current_epoch)
-                    
-                    subprocess.run(['xrdcp',os.path.join(self.checkpoint_dir,name),os.path.join(self.save_dir,name)])
+                    try:
+                        subprocess.run(['xrdcp',os.path.join(self.checkpoint_dir,name),os.path.join(self.save_dir,name)])
+                    except:
+                        pass
         return self.history
     
     def print_params(self,prefix=None):
