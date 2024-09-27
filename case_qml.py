@@ -148,7 +148,7 @@ class Trainer(object):
         ut.Pickle({'weights':self.current_weights},name,path=save_dir)
 
 
-@qml.qnode(dev,interface=args.backend)
+@qml.qnode(dev,interface=args.backend,diff_method="adjoint")
 def circuit(weights,inputs=None):
     # State preparation for all wires
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
@@ -199,7 +199,7 @@ def reuploading_circuit(weights,inputs=None):
     for item in two_comb_wires: 
         qml.CNOT(wires=item)
     
-    # Layer 2
+    #Layer 2
     for w in auto_wires:
         # Variables named according to spherical coordinate system, it's easier to understand :)
         
@@ -207,8 +207,10 @@ def reuploading_circuit(weights,inputs=None):
         # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
         qml.RY(radius*zenith, wires=w)   
         qml.RZ(radius*azimuth, wires=w)  
-    # QAE Circuit
-
+    
+    # for item in two_comb_wires: 
+    #     qml.CRX(radius*np.pi,wires=item)
+    
     for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
         qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
     
