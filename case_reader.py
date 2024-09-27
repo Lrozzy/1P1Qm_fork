@@ -229,11 +229,14 @@ def rescale_and_reshape(data: list[np.ndarray]):
     eta_index=ut.getIndex('particle','eta')
     phi_index=ut.getIndex('particle','phi')
     data_len=nnp.cumsum([arr.shape[0] for arr in data])
+    print(data_len)
+    
     stacked_data = nnp.concatenate(data, axis=0)
     stacked_data[:, :, pt_index] = rescale(stacked_data[:, :, pt_index], min=0., max=1.0, epsilon=1.0e-4)
     stacked_data[:, :, eta_index] = rescale(stacked_data[:, :, eta_index], min=0., max=nnp.pi, epsilon=1.0e-4)
     stacked_data[:, :, phi_index] = rescale(stacked_data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=1.0e-4)
     #import pdb;pdb.set_trace()
+    import pdb;pdb.set_trace()
     return nnp.split(stacked_data, data_len)[:-1]
 
 def rescale(data, min=0., max=1., epsilon=1.0e-4):
