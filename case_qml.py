@@ -66,10 +66,13 @@ if (args.device=='lightning.gpu'):
     print("Using GPU backend")
 
 if args.train:
-    dev=qml.device(args.device,wires=args.wires+args.trash_qubits+1,shots=args.shots)
+    NUM_QUBITS=args.wires+args.trash_qubits*2
+    dev=qml.device(args.device,wires=NUM_QUBITS,shots=args.shots)
     two_comb_wires=list(combinations([i for i in range(args.wires)],2))   
-    all_wires=[_ for _ in range(args.wires+args.trash_qubits+1)]
-    ancillary_wires=all_wires[-1:]
+    #all_wires=[_ for _ in range(args.wires+args.trash_qubits+1)]
+    #ancillary_wires=all_wires[-1:]
+    all_wires=[_ for _ in range(args.wires+args.trash_qubits*2)]
+    ancillary_wires=all_wires[args.wires+args.trash_qubits:]
     print ('Ancillary wires:',ancillary_wires)
     auto_wires=all_wires[:args.wires]
     ref_wires=all_wires[args.wires:args.wires+args.trash_qubits] 
@@ -148,7 +151,7 @@ class Trainer(object):
         ut.Pickle({'weights':self.current_weights},name,path=save_dir)
 
 
-@qml.qnode(dev,interface=args.backend,diff_method="adjoint")
+@qml.qnode(dev,interface=args.backend)
 def circuit(weights,inputs=None):
     # State preparation for all wires
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
@@ -219,10 +222,16 @@ def reuploading_circuit(weights,inputs=None):
     
 
     # SWAP test to measure fidelity
-    qml.Hadamard(ancillary_wires)
-    for ref_wire,trash_wire in zip(ref_wires,auto_wires[-args.trash_qubits:]):
-        qml.CSWAP(wires=[ancillary_wires[0], ref_wire, trash_wire])
-    qml.Hadamard(ancillary_wires)
+    # qml.Hadamard(ancillary_wires)
+    # for ref_wire,trash_wire in zip(ref_wires,auto_wires[-args.trash_qubits:]):
+    #     qml.CSWAP(wires=[ancillary_wires[0], ref_wire, trash_wire])
+    # qml.Hadamard(ancillary_wires)
+    
+    for ref_wire,trash_wire,ancilla in zip(ref_wires,auto_wires[-args.trash_qubits:],ancillary_wires):
+        qml.Hadamard(ancilla)
+        qml.CSWAP(wires=[ancilla, ref_wire, trash_wire])
+        qml.Hadamard(ancilla)
+    
     return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
 
 

@@ -16,20 +16,27 @@ ref_wires = None
 ancillary_wires = None
 index = None
 n_trash_qubits = -1
-
-def initialize(wires:int=4, trash_qubits:int=0):
-    global all_wires, auto_wires, two_comb_wires, ref_wires, ancillary_wires, index, n_trash_qubits
+SEPARATE_ANCILLA=False
+def initialize(wires:int=4, trash_qubits:int=0,separate_ancilla=False):
+    global all_wires, auto_wires, two_comb_wires, ref_wires, ancillary_wires, index, n_trash_qubits,SEPARATE_ANCILLA
+    if separate_ancilla:
+        SEPARATE_ANCILLA=True
+        N_QUBITS=wires+trash_qubits*2
+        N_ANCILLA=trash_qubits
+    else:
+        N_QUBITS=wires+trash_qubits+1
+        N_ANCILLA=1
+    all_wires=[_ for _ in range(N_QUBITS)]
     n_trash_qubits = trash_qubits
     two_comb_wires=list(combinations([i for i in range(wires)],2))
-    all_wires=[_ for _ in range(wires+trash_qubits+1)]
-    ancillary_wires=all_wires[-1:]
+    ancillary_wires=all_wires[-N_ANCILLA:]
     auto_wires=all_wires[:wires]
-    ref_wires=all_wires[wires:wires+trash_qubits] # Do not initialize ref_wires before n_trash_qubits is set
-    
+    ref_wires=all_wires[wires:wires+trash_qubits] # Do not initialize ref_wires before n_trash_qubits is set    
     index={'eta':getIndex('particle','eta'),'phi':getIndex('particle','phi'),'pt':getIndex('particle','pt')}
 def set_device(shots:int=5000,device_name:str='default.qubit'):
     global dev
     dev=qml.device(device_name,wires=len(all_wires),shots=shots)
+    print(dev)
     return dev
 def print_training_params():
     print("\n Sanity check: \n")
@@ -42,7 +49,9 @@ def print_training_params():
     print('index:',index)
     print('n_trash_qubits:',n_trash_qubits)
     print("\n ############################################## \n")
-
+    print("Sleep on it for 10s")
+    print("\n ############################################## \n")
+    time.sleep(10)
 def circuit(weights,inputs=None):
     # State preparation for all wires
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
@@ -111,16 +120,16 @@ def reuploading_circuit(weights,inputs=None):
     
 
     # SWAP test to measure fidelity
-    qml.Hadamard(ancillary_wires)
-    for ref_wire,trash_wire in zip(ref_wires,auto_wires[-n_trash_qubits:]):
-        qml.CSWAP(wires=[ancillary_wires[0], ref_wire, trash_wire])
-    qml.Hadamard(ancillary_wires)
+    for ref_wire,trash_wire,ancilla in zip(ref_wires,auto_wires[-n_trash_qubits:],ancillary_wires):
+        qml.Hadamard(ancilla)
+        qml.CSWAP(wires=[ancilla, ref_wire, trash_wire])
+        qml.Hadamard(ancilla)
     return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
 
 class QuantumAutoencoder:
-    def __init__(self, wires:int=4,trash_qubits:int=0,dev_name:str='default.qubit',backend_name:str='autograd',test=False):
-        initialize(wires=wires,trash_qubits=trash_qubits)
-        self.device=set_device(shots=1000,device_name=dev_name)
+    def __init__(self, wires:int=4,shots=5000,trash_qubits:int=0,dev_name:str='default.qubit',backend_name:str='autograd',test=False,separate_ancilla=False):
+        initialize(wires=wires,trash_qubits=trash_qubits,separate_ancilla=separate_ancilla)
+        self.device=set_device(shots=shots,device_name=dev_name)
         self.backend=backend_name
         self.current_weights=None
         self.circuit = None
@@ -236,10 +245,11 @@ class QuantumTrainer():
                 self.save(self.save_dir,name=name)
                 if self.is_evictable:
                     print ('Will copy over checkpoints')
-                    name='ep{:03}.pickle'.format(self.current_epoch)
+                    name='ep{:02}.pickle'.format(self.current_epoch)
                     try:
-                        subprocess.run(['xrdcp',os.path.join(self.checkpoint_dir,name),os.path.join(self.save_dir,name)])
+                        subprocess.run(['xrdcp',os.path.join(self.checkpoint_dir,name),f"{os.environ['EOS_MGM_URL']}://eos/user/a/aritra/QML/saved_models/{os.path.split(self.save_dir)[-1]}/"])
                     except:
+                        print("Failed to copy over checkpoints")
                         pass
         return self.history
     

@@ -16,6 +16,7 @@ parser.add_argument('--device_name',default='default.qubit',help='device name fo
 parser.add_argument('--lr',default=0.01,type=float)
 parser.add_argument('--save',default=False,action='store_true')
 parser.add_argument('--evictable',default=False,action='store_true')
+parser.add_argument('--separate_ancilla',default=False,action='store_true')
 parser.add_argument('--desc',default='Training run')
 parser.add_argument('--n_threads',default='8',type=str)
 args=parser.parse_args()
@@ -38,8 +39,6 @@ from loguru import logger
 import quantum.architectures as qc
 import quantum.losses as loss
 import datetime
-
-
 
 
 args.non_trash=args.wires-args.trash_qubits
@@ -66,7 +65,7 @@ logger.add(os.path.join(save_dir,'logs.log'),rotation='10 MB',backtrace=True,dia
 # Set device name
 device_name=args.device_name
 ### Initialize the quantum autoencoder ##
-qAE=qc.QuantumAutoencoder(wires=args.wires, trash_qubits=args.trash_qubits, dev_name=args.device_name)
+qAE=qc.QuantumAutoencoder(wires=args.wires, shots=args.shots, trash_qubits=args.trash_qubits, dev_name=args.device_name,separate_ancilla=args.separate_ancilla)
 qAE.set_circuit(reuploading=True)
 
 
