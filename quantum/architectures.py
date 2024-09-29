@@ -104,13 +104,23 @@ def reuploading_circuit(weights,inputs=None):
     
     # Layer 2
     for w in auto_wires:
-        # Variables named according to spherical coordinate system, it's easier to understand :)
-        
+        # Variables named according to spherical coordinate system, it's easier to understand :)    
+        radius = inputs[:,w, index['pt']] # corresponding to pt
+        azimuth = inputs[:,w, index['phi']] # corresponding to phi
         radius = inputs[:,w, index['pt']] # corresponding to pt
         # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
         qml.RY(radius*zenith, wires=w)   
         qml.RZ(radius*azimuth, wires=w)  
-    # QAE Circuit
+    # # QAE Circuit
+    
+    # for item in two_comb_wires:
+    #     w=item[1] 
+    #     zenith = inputs[:,w, index['eta']] # corresponding to eta
+    #     azimuth = inputs[:,w, index['phi']] # corresponding to phi
+    #     radius = inputs[:,w, index['pt']] # corresponding to pt
+    #     qml.CRY(radius*zenith,wires=item)
+    #     qml.CRZ(radius*azimuth,wires=item)
+    
 
     for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
         qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
@@ -247,7 +257,8 @@ class QuantumTrainer():
                     print ('Will copy over checkpoints')
                     name='ep{:02}.pickle'.format(self.current_epoch)
                     try:
-                        subprocess.run(['xrdcp',os.path.join(self.checkpoint_dir,name),f"{os.environ['EOS_MGM_URL']}://eos/user/a/aritra/QML/saved_models/{os.path.split(self.save_dir)[-1]}/"])
+                        # Fetch the seed by splitting the save_dir - last directory in tree should be the seed
+                        subprocess.run(['xrdcp',os.path.join(self.checkpoint_dir,name),f"{os.environ['EOS_MGM_URL']}://eos/user/a/aritra/QML/checkpoint_dumps/{os.path.split(self.save_dir)[-1]}/"])
                     except:
                         print("Failed to copy over checkpoints")
                         pass
