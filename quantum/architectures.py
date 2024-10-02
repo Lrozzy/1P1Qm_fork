@@ -29,9 +29,9 @@ def initialize(wires:int=4, trash_qubits:int=0,separate_ancilla=False):
     all_wires=[_ for _ in range(N_QUBITS)]
     n_trash_qubits = trash_qubits
     two_comb_wires=list(combinations([i for i in range(wires)],2))
-    ancillary_wires=all_wires[-N_ANCILLA:]
+    ancillary_wires=all_wires[-N_ANCILLA:] # The last N qubits (earlier, we had N=1) are the ancilla
     auto_wires=all_wires[:wires]
-    ref_wires=all_wires[wires:wires+trash_qubits] # Do not initialize ref_wires before n_trash_qubits is set    
+    ref_wires=all_wires[wires:wires+trash_qubits] # Do NOT initialize ref_wires before n_trash_qubits is set    
     index={'eta':getIndex('particle','eta'),'phi':getIndex('particle','phi'),'pt':getIndex('particle','pt')}
 def set_device(shots:int=5000,device_name:str='default.qubit'):
     global dev
@@ -49,9 +49,13 @@ def print_training_params():
     print('index:',index)
     print('n_trash_qubits:',n_trash_qubits)
     print("\n ############################################## \n")
-    print("Sleep on it for 10s")
+    print("Sleep on it for 5s")
+    print("Maybe you want to change something?")
+    print("Then press CTRL-C")
     print("\n ############################################## \n")
-    time.sleep(10)
+    time.sleep(5)
+    print("LETS GOOOOOOOOOOOOO")
+    time.sleep(1)
 def circuit(weights,inputs=None):
     # State preparation for all wires
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
@@ -113,20 +117,20 @@ def reuploading_circuit(weights,inputs=None):
         qml.RZ(radius*azimuth, wires=w)  
     # # QAE Circuit
     
-    # for item in two_comb_wires:
-    #     w=item[1] 
-    #     zenith = inputs[:,w, index['eta']] # corresponding to eta
-    #     azimuth = inputs[:,w, index['phi']] # corresponding to phi
-    #     radius = inputs[:,w, index['pt']] # corresponding to pt
-    #     qml.CRY(radius*zenith,wires=item)
-    #     qml.CRZ(radius*azimuth,wires=item)
+    for item in two_comb_wires:
+        w=item[1] 
+        zenith = inputs[:,w, index['eta']] # corresponding to eta
+        azimuth = inputs[:,w, index['phi']] # corresponding to phi
+        radius = inputs[:,w, index['pt']] # corresponding to pt
+        qml.CRY(radius*zenith,wires=item)
+        qml.CRZ(radius*azimuth,wires=item)
     
 
     for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
         qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
     
-    for item in two_comb_wires: 
-        qml.CNOT(wires=item)
+    # for item in two_comb_wires: 
+    #     qml.CNOT(wires=item)
     
 
     # SWAP test to measure fidelity
@@ -194,8 +198,9 @@ class QuantumTrainer():
         else: 
             cost,fid=self.quantum_loss(self.current_weights,inputs=data,quantum_cost=self.circuit,return_fid=True)
             return float(cost),float(fid)
-    def is_evictable_job(self):
+    def is_evictable_job(self,seed=None):
         self.is_evictable=True
+        self.seed=None
     def run_training_loop(self,train_loader,val_loader):
         self.print_params('Initial weights: ')
         for n_epoch in tqdm(range(self.epochs+1)):
@@ -253,12 +258,13 @@ class QuantumTrainer():
                 else:
                     name=None
                 self.save(self.save_dir,name=name)
-                if self.is_evictable:
+                if (self.is_evictable)&(n_epoch>0):
                     print ('Will copy over checkpoints')
                     name='ep{:02}.pickle'.format(self.current_epoch)
                     try:
                         # Fetch the seed by splitting the save_dir - last directory in tree should be the seed
-                        subprocess.run(['xrdcp',os.path.join(self.checkpoint_dir,name),f"{os.environ['EOS_MGM_URL']}://eos/user/a/aritra/QML/checkpoint_dumps/{os.path.split(self.save_dir)[-1]}/"])
+                        tmpfile=f"{os.environ['EOS_MGM_URL']}://eos/user/{os.environ['CERN_USERNAME'][0]}/{os.environ['CERN_USERNAME']}/QML/checkpoint_dumps/{self.seed}/{name}"
+                        subprocess.call(f'xrdcp {os.path.join(self.checkpoint_dir,name)} '+tmpfile,shell=True)
                     except:
                         print("Failed to copy over checkpoints")
                         pass
