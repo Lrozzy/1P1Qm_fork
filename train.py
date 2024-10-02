@@ -1,32 +1,31 @@
 from argparse import ArgumentParser
 import os,pathlib
+import subprocess
 parser=ArgumentParser(description='select options to train quantum autoencoder')
 parser.add_argument('--seed',default=9999,type=int,help='Some number to index the run')
-parser.add_argument('--train',default=False,action='store_true',help='train network!')
+parser.add_argument('--train',default=False,action='store_true',help='train the damn network!')
 parser.add_argument('--wires',default=4,type=int,help='number of wires/qubits that the circuit needs to process(AB system)')
 parser.add_argument('--trash-qubits',default=1,type=int,help='number of qubits defining the B system, or the reference and trash states!')
-parser.add_argument('--shots',default=5000,type=int)
-parser.add_argument('--train_n',default=100000,type=int)
-parser.add_argument('--valid_n',default=20000,type=int)
-parser.add_argument('-b','--batch-size',default=1,type=int)
-parser.add_argument('-e','--epochs',default=20,type=int)
+parser.add_argument('--shots',default=5000,type=int,help='number of shots for measurement of a given state')
+parser.add_argument('--train_n',default=100000,type=int,help='number of samples to train on')
+parser.add_argument('--valid_n',default=20000,type=int,help='number of samples to validate on')
+parser.add_argument('-b','--batch-size',default=1,type=int,help='batch size')
+parser.add_argument('-e','--epochs',default=20,type=int,help='number of epochs to train for')
 parser.add_argument('--backend',default='autograd')
 parser.add_argument('--device_name',default='default.qubit',help='device name for the quantum circuit. If you use lightning.kokkos, be sure \
-    to set the OMP_PROC_BIND and OMP_n_threads environment variables')
+    to set the OMP_PROC_BIND and OMP_NUM_THREADS environment variables')
 parser.add_argument('--lr',default=0.01,type=float)
-parser.add_argument('--save',default=False,action='store_true')
-parser.add_argument('--evictable',default=False,action='store_true')
-parser.add_argument('--separate_ancilla',default=False,action='store_true')
-parser.add_argument('--desc',default='Training run')
+parser.add_argument('--save',default=False,action='store_true',help='Set to true to save the model')
+parser.add_argument('--evictable',default=False,action='store_true',help='Set to true if you are running on a cluster \
+                    where jobs are evictable. In that case, it will copy over checkpoints to CERN EOS.\
+                     At the moment, set destination manually in architectures.py')
+parser.add_argument('--separate_ancilla',default=False,action='store_true',help='Set to true if you want to use 1 ancilla qubit per trash/reference pair')
+parser.add_argument('--desc',default='Training run',help='Set a description for logging purposes')
 parser.add_argument('--n_threads',default='8',type=str)
+parser.add_argument('--jax_use_gpu',default=False,action='store_true')
 args=parser.parse_args()
 
-if args.device_name=='lightning.kokkos':
-    os.environ['OMP_NUM_THREADS']=args.n_threads
-    os.environ['OMP_PROC_BIND']='true'
-    print(f"Initialized device {args.device_name} with {os.environ['OMP_NUM_THREADS']} threads")
-else:
-    print(f"Initialized device {args.device_name}")
+print(f"Using device {args.device_name}")
 
 
 import glob,time
@@ -39,7 +38,6 @@ from loguru import logger
 import quantum.architectures as qc
 import quantum.losses as loss
 import datetime
-
 
 args.non_trash=args.wires-args.trash_qubits
 assert args.non_trash>0,'Need strictly positive dimensional compressed representation of input state!'
@@ -57,11 +55,17 @@ if args.save:
     plot_dir=os.path.join(save_dir,'plots')
     pathlib.Path(plot_dir).mkdir(parents=True,exist_ok=True)
     print("Will save models to: ",save_dir)
-
+    tmpfile=os.path.join(save_dir,'FROZEN_ARCHITECTURE.py')
+    subprocess.call('cp quantum/architectures.py '+tmpfile,shell=True)
 
 
 logger.add(os.path.join(save_dir,'logs.log'),rotation='10 MB',backtrace=True,diagnose=True,level='DEBUG', mode="w")
-
+logger.info("########################################### \n\n")
+if args.separate_ancilla:
+    logger.info(f"This circuit contains {args.wires+2*args.trash_qubits} qubits")
+else:
+    logger.info(f"This circuit contains {args.wires+args.trash_qubits+1} qubits")
+logger.info("\n\n ########################################### \n\n")
 # Set device name
 device_name=args.device_name
 ### Initialize the quantum autoencoder ##
