@@ -72,8 +72,6 @@ device_name=args.device_name
 qAE=qc.QuantumAutoencoder(wires=args.wires, shots=args.shots, trash_qubits=args.trash_qubits, dev_name=args.device_name,separate_ancilla=args.separate_ancilla)
 qAE.set_circuit(reuploading=True)
 
-
-
 cost_fn=loss.batch_semi_classical_cost
 qc.print_training_params()
 

@@ -14,15 +14,9 @@ parser.add_argument('--signal',default='grav_2p5_narrow',help='Signal to test ag
 parser.add_argument('--device_name',default='default.qubit',help='device name for the quantum circuit. If you use lightning.kokkos, be sure \
     to set the OMP_PROC_BIND and OMP_NUM_THREADS environment variables')
 args=parser.parse_args()
-# if args.device_name=='lightning.kokkos':
-#     os.environ['OMP_NUM_THREADS']=args.n_threads
-#     os.environ['OMP_PROC_BIND']='true'
-#     print(f"Initialized device {args.device_name} with {os.environ['OMP_NUM_THREADS']} threads")
-# else:
-#     print(f"Initialized device {args.device_name}")
 
 with omp_num_threads(int(args.n_threads)):
-    import quantum.architectures as qc
+    
     import quantum.losses as loss
     import numpy as nnp
     import helpers.utils as ut
@@ -32,19 +26,23 @@ with omp_num_threads(int(args.n_threads)):
     import matplotlib;matplotlib.use('Agg')
     from sklearn.metrics import roc_curve,roc_auc_score
     from sklearn.preprocessing import MinMaxScaler
-
-
+    try: 
+        import importlib
+        qc=importlib.import_module('saved_models.'+str(args.seed)+'.FROZEN_ARCHITECTURE')
+    except:
+        import quantum.architectures as qc
+        print("Frozen architecture not found in save directory")
     read_n=args.read_n
 
     dump_dir=os.path.join(ps.path_dict['QAE_dump'],str(args.seed))
     pathlib.Path(dump_dir).mkdir(parents=True,exist_ok=True)
     save_dir=os.path.join(ps.path_dict['QAE_save'],str(args.seed))
+    
     plot_dir=os.path.join(save_dir,'plots')
     hist_dir=os.path.join(plot_dir,'mjj_histograms')
     pathlib.Path(hist_dir).mkdir(parents=True,exist_ok=True)
 
     assert os.path.isfile(os.path.join(save_dir,'args.pickle')),'args.pickle not found in: '+save_dir
-
     backend_name=args.backend
     device_name=args.device_name
     test_args=ut.Unpickle(os.path.join(save_dir,'args.pickle'))
