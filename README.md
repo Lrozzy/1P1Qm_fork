@@ -21,12 +21,21 @@ It is possible to use a GPU for accelerated training as well. To do this, change
 
 You can use the docker container here:
 
-    docker pull neutrinoman4/qml-lightning.gpu:v2.0
+    docker pull neutrinoman4/qml-lightning.gpu:v3.0
 
+The Docker image above is based on the Pennylane Lightning GPU v0.38.0 docker image, and contains some additional relevant libraries. 
+To run your code, use the `train.py` script as shown below. While this script does almost the same thing as `case_qml.py` does, it is not self-contained. The quantum circuit architecture is loaded from `quantum/architectures.py` and the loss function from `quantum/losses.py`. At the moment, two circuit architectures are defined: `circuit()` and `reuploading_circuit()`. You are free to try out new circuit architectures. The `train.py` method copies the current version of the `architecture.py` file to the `save_dir` as `save_dir/FROZEN_ARCHITECTURE.py`, in case you edit this file in between runs.  
+    
+    python3 train.py --train --wires ${QUBITS} --trash-qubits ${TRASH} -b 100 -e 15 --backend "autograd" --save --seed ${seed} --lr 0.005 --desc "'${DESC}'" --train_n ${TRAIN_N} --valid_n ${VALID_N} --device lightning.gpu
 
+To run GPU jobs on an HTCondor cluster, take a look at the scripts in `condor_example/`.
+
+To get a description of the possible options, run `python3 train.py --help`
 Notes: 
 - The argument `--seed` (set here to `$RANDOM`) is used to identify a given training run, which is then further described by the text contained in the `--desc` argument.
-- The directories where the input files are stored, and where the results are stored, can be set by modifying `helpers.utils.path_dict` 
+- The directories where the input files are stored, and where the results are stored, can be set by modifying `path_dict` located in the python file `helpers/utils.py`. What needs to be changed should be more or less self-explanatory. 
 - If `seed = S`, then a new subdirectory is created in the base save directory at the path `/path/to/base/directory/S` and your results are saved there.   
 - The data loader is defined in `case_reader.py`, the quantum circuit architecture is defined in `quantum.architecture` and the loss function is defined in `quantum.losses`. Feel free to modify/add to it!
+
+You can get (a subset of) the training data [here](https://drive.google.com/drive/folders/1fGATNxxcCKPk6mZ54Ucv1mYZteOnh33-?usp=sharing).  
 
