@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Optional, Callable, Union, List, Dict, Tuple, Any
 import pennylane as qml
 from helpers.utils import getIndex
 from itertools import combinations
@@ -8,6 +8,8 @@ import pennylane.numpy as np
 import os,pathlib
 import helpers.utils as ut
 import subprocess
+from torch import DataLoader
+# Global variable initialization
 dev = None
 all_wires=None
 two_comb_wires = None
@@ -17,7 +19,17 @@ ancillary_wires = None
 index = None
 n_trash_qubits = -1
 SEPARATE_ANCILLA=False
+
 def initialize(wires:int=4, trash_qubits:int=0,separate_ancilla=False):
+    """
+    Initializes the wire(qubit) indices, creates the two-combinations and sets up other necessary variables globally
+
+    Args:
+        wires (int): Number of wires (qubits) for the circuit.
+        trash_qubits (int): Number of qubits reserved for trash.
+        separate_ancilla (bool): Whether to separate ancillary qubits from main qubits.
+    """
+
     global all_wires, auto_wires, two_comb_wires, ref_wires, ancillary_wires, index, n_trash_qubits,SEPARATE_ANCILLA
     if separate_ancilla:
         SEPARATE_ANCILLA=True
@@ -33,12 +45,26 @@ def initialize(wires:int=4, trash_qubits:int=0,separate_ancilla=False):
     auto_wires=all_wires[:wires]
     ref_wires=all_wires[wires:wires+trash_qubits] # Do NOT initialize ref_wires before n_trash_qubits is set    
     index={'eta':getIndex('particle','eta'),'phi':getIndex('particle','phi'),'pt':getIndex('particle','pt')}
-def set_device(shots:int=5000,device_name:str='default.qubit'):
+def set_device(shots:int=5000,device_name:str='default.qubit')-> qml.Device:
+    """
+    Sets the device on which to simulate/run the quantum circuit
+
+    Args:
+        shots (int): Number of shots for each measurement of an observable.
+        device_name (str): Name of the quantum device to use.
+
+    Returns:
+        qml.Device: Initialized Pennylane device.
+    """
     global dev
     dev=qml.device(device_name,wires=len(all_wires),shots=shots)
     print(dev)
     return dev
-def print_training_params():
+def print_training_params()->None:
+    """
+    Prints out the initialized training parameters for sanity check.
+    Pauses for a short time to allow the user to review the parameters.
+    """
     print("\n Sanity check: \n")
     print('all_wires:',all_wires)
     print()
@@ -56,7 +82,17 @@ def print_training_params():
     time.sleep(5)
     print("LETS GOOOOOOOOOOOOO")
     time.sleep(1)
-def circuit(weights,inputs=None):
+def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
+    """
+    Defines the quantum autoencoder (QAE) circuit using provided weights and inputs.
+
+    Args:
+        weights (np.ndarray): Circuit parameters (AKA weights) for rotations.
+        inputs (np.ndarray): Input data to be used in the circuit. Defaults to None.
+
+    Returns:
+        Any: Expected value of Pauli-Z tensor product on the ancillary qubits.
+    """
     # State preparation for all wires
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
     # State preparation for all wires
@@ -84,7 +120,17 @@ def circuit(weights,inputs=None):
     qml.Hadamard(ancillary_wires)
     return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
 
-def reuploading_circuit(weights,inputs=None):
+def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
+    """
+    Defines the feature re-uploading quantum autoencoder (QAE) circuit with 2 layers.
+
+    Args:
+        weights (np.ndarray): Circuit parameters (AKA weights) for rotations and gates.
+        inputs (np.ndarray): Input data to be used in the circuit. Defaults to None.
+
+    Returns:
+        Any: Expected value of Pauli-Z tensor product on the ancillary qubits.
+    """
     # State preparation for all wires
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
     # State preparation for all wires
@@ -141,6 +187,18 @@ def reuploading_circuit(weights,inputs=None):
     return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
 
 class QuantumAutoencoder:
+    """
+    A class that constructs a Quantum Autoencoder (QAE) using pre-defined circuits.
+
+    Args:
+        wires (int): Number of qubits to use.
+        shots (int): Number of shots for measurements on quantum states.
+        trash_qubits (int): Number of trash qubits used in the circuit.
+        dev_name (str): Name of the quantum device to use.
+        backend_name (str): Backend for the QNode (e.g., 'autograd', 'torch', 'jax').
+        test (bool): If True, sets the circuit immediately for testing.
+        separate_ancilla (bool): If True, uses a separate ancillary qubit for each trash/reference qubit pair.
+    """
     def __init__(self, wires:int=4,shots=5000,trash_qubits:int=0,dev_name:str='default.qubit',backend_name:str='autograd',test=False,separate_ancilla=False):
         initialize(wires=wires,trash_qubits=trash_qubits,separate_ancilla=separate_ancilla)
         self.device=set_device(shots=shots,device_name=dev_name)
@@ -148,22 +206,58 @@ class QuantumAutoencoder:
         self.current_weights=None
         self.circuit = None
         if test: self.set_circuit() # Set the circuit for inference
-    def set_circuit(self,reuploading=False):
+    def set_circuit(self,reuploading:bool=False)->None:
+        """
+        Configures the QNode circuit for the quantum autoencoder.
+
+        Args:
+            reuploading (bool): If True, uses the feature re-uploading circuit.
+        """
         if reuploading:
             print("Using Feature-Reuploading Circuit with 2 layers")
             self.circuit = qml.QNode(reuploading_circuit,self.device,interface=self.backend)
         else:
             self.circuit = qml.QNode(circuit,self.device,interface=self.backend)
-    def fetch_circuit(self):
+    def fetch_circuit(self) -> qml.QNode:
+        """
+        Retrieves the quantum circuit for inference or training.
+
+        Returns:
+            qml.QNode: Configured quantum node (QNode) circuit.
+        """
         if self.circuit is None:
             self.set_circuit()
         return self.circuit
-    def fetch_backend(self):
+    def fetch_backend(self) -> str:
+        """
+        Fetches the backend being used for the QNode.
+
+        Returns:
+            str: Name of the backend (e.g., 'autograd', 'torch').
+        """
         return self.backend
-    def load_weights(self,model_path,train=False):
+    def load_weights(self,model_path:str,train:bool=False):
+        """
+        Loads the pre-trained weights for the autoencoder from the given file.
+
+        Args:
+            model_path (str): Path to the file containing the pre-trained model.
+            train (bool): If True, enables gradients for the weights.
+        """
         dictionary=ut.Unpickle(model_path)
         self.current_weights=np.array(dictionary['weights'],requires_grad=train)
-    def run_inference(self,data,loss_fn=None):
+    def run_inference(self,data:np.ndarray,loss_fn:Callable=None):
+        """
+        Runs inference on the autoencoder circuit using the loaded weights.
+
+        Args:
+            data (np.ndarray): Input data for the quantum circuit.
+            loss_fn (Callable): Loss function to calculate the quantum cost.
+
+        Returns:
+            Tuple[float, float]: Inference loss and fidelity.
+        """
+
         print("Running in inference mode \n No batching will be performed so don't expect a progress bar")
         if self.current_weights is None:
             raise ValueError('Weights not initialized. Load a model first by calling load_weights(model_path)')       
@@ -172,7 +266,24 @@ class QuantumAutoencoder:
         return costs,fids
     
 class QuantumTrainer():
-    def __init__(self,model:QuantumAutoencoder,lr:float=0.001,optimizer=None,loss_fn=None,save=True,train_max_n=1e5,valid_max_n=2e4,epochs=20,patience=4,**kwargs):
+    """
+    A class for training a given quantum circuit.
+
+    Args:
+        model (QuantumAutoencoder): The quantum autoencoder model to be trained.
+        lr (float): Learning rate for the optimizer.
+        optimizer (Callable): The optimizer used for training.
+        loss_fn (Callable): The loss function used for optimization.
+        save (bool): Whether to save the trained model and checkpoints.
+        train_max_n (int): Maximum number of training samples.
+        valid_max_n (int): Maximum number of validation samples.
+        epochs (int): Number of training epochs.
+        patience (int): Patience for early stopping.
+        kwargs (dict): Additional keyword arguments for training.
+    """
+    def __init__(self, model: QuantumAutoencoder, lr: float = 0.001, optimizer: Callable = None, 
+                 loss_fn: Callable = None, save: bool = True, train_max_n: int = 100000, 
+                 valid_max_n: int = 20000, epochs: int = 20, patience: int = 4, **kwargs: Any) -> None:
         self.circuit=model.fetch_circuit()
         self.backend=model.fetch_backend()
         self.init_weights=kwargs['init_weights']
@@ -184,24 +295,52 @@ class QuantumTrainer():
         self.patience=patience
         self.saving=save
         self.current_weights=self.init_weights
-        self.optim=optimizer# Previously had the deprecated argument diag_approx=True
+        self.optim=optimizer
         self.quantum_loss=loss_fn
         self.current_epoch=0
         self.is_evictable=False
         self.history={'train':[],'val':[],'accuracy':[]}
         print (f'Performing optimization with: {self.optim} | Setting Learning rate: {lr}')
         print ('Backend:',self.backend,'\n')
-    def iteration(self,data,train=False):
+
+    def iteration(self,data: np.ndarray, train: bool = False) -> Union[float, Tuple[float, float]]:
+        """
+        Performs a single training or validation iteration.
+
+        Args:
+            data (np.ndarray): Batch of input data.
+            train (bool): Whether to perform training (True) or validation (False).
+
+        Returns:
+            Union[float, Tuple[float, float]]: Training loss (or validation loss and fidelity).
+        """
         if train:
             self.current_weights, cost = self.optim.step_and_cost(self.quantum_loss,self.current_weights,inputs=data,quantum_cost=self.circuit)
             return float(cost)
         else: 
             cost,fid=self.quantum_loss(self.current_weights,inputs=data,quantum_cost=self.circuit,return_fid=True)
             return float(cost),float(fid)
-    def is_evictable_job(self,seed=None):
+    def is_evictable_job(self,seed:bool=None):
+        """
+        Marks the current job as evictable and enables copying of checkpoints to EOS.
+
+        Args:
+            seed (int, optional): Random seed for checkpoint saving. Defaults to None.
+        """
         self.is_evictable=True
-        self.seed=None
-    def run_training_loop(self,train_loader,val_loader):
+        self.seed=seed
+
+    def run_training_loop(self,train_loader:DataLoader,val_loader:DataLoader):
+        """
+        Executes the full training loop, including training and validation.
+
+        Args:
+            train_loader (Any): DataLoader for the training dataset.
+            val_loader (Any): DataLoader for the validation dataset.
+
+        Returns:
+            Dict[str, List[float]]: Training and validation history (losses and accuracies).
+        """
         self.print_params('Initial weights: ')
         for n_epoch in tqdm(range(self.epochs+1)):
             sample_counter=0
@@ -271,25 +410,59 @@ class QuantumTrainer():
                         pass
         return self.history
     
-    def print_params(self,prefix=None):
+    def print_params(self,prefix: Optional[str]=None) -> None:
+        """
+        Prints the current parameters (weights) of the quantum autoencoder.
+
+        Args:
+            prefix (Optional[str]): An optional prefix to print before the parameters. 
+                                    Defaults to None.
+        """
         if prefix is not None: print (prefix)
         print('autograd weights:',self.current_weights,'\n')
         
-    def save(self, save_dir,name=None):
+    def save(self, save_dir: str, name: Optional[str] = None) -> None:
+        """
+        Saves the model weights to a specified directory.
+
+        Args:
+            save_dir (str): Directory where the model weights will be saved.
+            name (Optional[str]): The name of the file to save. Defaults to None.
+                                If not provided, the file name will be based on the current epoch.
+        """
         if name is None:
             if self.current_epoch>100: name = 'ep{:03}.pickle'.format(self.current_epoch)
             else: name='ep{:02}.pickle'.format(self.current_epoch)
         if 'trained' not in name: save_dir=self.checkpoint_dir
         ut.Pickle({'weights':self.current_weights},name,path=save_dir)
     
-    def get_current_epoch(self):
+    def get_current_epoch(self) -> None:
+        """
+        Returns the current epoch number during training.
+
+        Returns:
+            int: The current epoch number.
+        """
         return self.current_epoch
     
-    def set_directories(self,save_dir):
+    def set_directories(self,save_dir: str) -> None:
+        """
+        Sets up directories for saving model checkpoints and logs.
+
+        Args:
+            save_dir (str): The directory where model and checkpoints will be saved.
+        """
         self.save_dir=save_dir
         self.checkpoint_dir=os.path.join(save_dir,'checkpoints')
         pathlib.Path(self.checkpoint_dir).mkdir(parents=True,exist_ok=True)
     
-    def fetch_history(self):
+    def fetch_history(self) -> Dict[str, List[float]]:
+        """
+        Fetches the history of training and validation losses and accuracies.
+
+        Returns:
+            Dict[str, List[float]]: A dictionary containing the history of training and 
+                                    validation losses and accuracies.
+        """
         return self.history
 

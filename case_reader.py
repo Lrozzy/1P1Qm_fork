@@ -1,35 +1,37 @@
 '''
-
 Date: August 2024
 Author: Aritra Bal, ETP
-Description: This script contains the data loader classes for the Delphes Datasets derived from the CASEDelphes analysis EXO-22-026
-
+Description: This script contains the data loader classes for the MC Datasets used in the studies performed for the CMS analysis EXO-22-026
 '''
 
 import os,h5py,glob
-os.environ["PYTHONPATH"]='/work/abal/qae_hep/'
 import helpers.utils as ut
-
 from pennylane import numpy as np
-
 from sklearn.preprocessing import MinMaxScaler
 import __main__
 import numpy as nnp
 import torch
 from torch.utils.data import IterableDataset, DataLoader
+from typing import List, Optional, Tuple, Union
+os.environ["PYTHONPATH"]='/work/abal/qae_hep/'
 
 class H5IterableDataset(IterableDataset):
-    def __init__(self, data_dir:str=ut.path_dict['QCD_train'], data_key:str='eventFeatures',max_samples:int=5e4,epsilon=1.0e-4, num_particles=5):
-        """
+    """
+        Iterable dataset class to load .h5 files for Delphes dataset.
+        Deprecated in favour of CASEDelphesJetDataset
+
         Args:
             data_dir (str): Directory containing the .h5 files.
             data_key (str): Key to access the numpy array inside the .h5 files.
+            max_samples (int): Maximum number of samples to load.
+            epsilon (float): Small constant to avoid division by zero.
+            num_particles (int): Number of particles to read per event (default is 5).
 
         Yields:
             torch.Tensor: A batch of data samples.
-        Notes:
-            - Ignore this class, superseded by CASEDelphesJetDataset
         """
+    def __init__(self, data_dir:str=ut.path_dict['QCD_train'], data_key:str='eventFeatures',max_samples:int=5e4,epsilon:float=1.0e-4, num_particles:int=5):
+        
         self.data_dir = data_dir
         self.data_key = data_key
         self.file_paths = sorted(glob.glob(os.path.join(data_dir, '*.h5')))
@@ -64,7 +66,24 @@ class H5IterableDataset(IterableDataset):
                     return # don't use break here
 
 class CASEDelphesJetDataset(IterableDataset):
-    def __init__(self, filelist:list[str]=None, batch_size:int=32, max_samples:int=5e4, data_key='jetConstituentsList',\
+    """
+    Iterable dataset class to load jet data from .h5 files.
+
+    Args:
+        filelist (List[str]): List of file paths to the .h5 files.
+        batch_size (int): Number of samples in each batch.
+        max_samples (int): Maximum number of samples to load.
+        data_key (str): Key to access the jet data inside the .h5 files.
+        feature_key (str): Key to access event-level features.
+        input_shape (tuple[int]): Input shape specifying number of particles and features.
+        epsilon (float): Small constant to avoid division by zero.
+        train (bool): Whether to yield only training data, or labels as well.
+        yield_energies (bool): If True, yield jet energies as well.
+
+    Yields:
+        np.ndarray: Batch of data samples.
+    """
+    def __init__(self, filelist:List[str]=None, batch_size:int=32, max_samples:int=5e4, data_key='jetConstituentsList',\
                  feature_key='eventFeatures',input_shape:tuple[int]=(10, 3),epsilon:float=1.0e-4,train:bool=True,yield_energies=False):
         super().__init__()
         self.filelist = sorted(filelist)
@@ -83,7 +102,19 @@ class CASEDelphesJetDataset(IterableDataset):
         self.train=train
         self.batch_counter=0
         self.yield_energies=yield_energies
-    def rescale(self, data, min=0., max=1., epsilon=1.0e-4):
+    def rescale(self, data:np.ndarray, min:float=0., max:float=1., epsilon:float=1.0e-4):
+        """
+        Rescales the data between a given range.
+
+        Args:
+            data (np.ndarray): Input data to rescale.
+            min (float): Minimum value of the scaled data.
+            max (float): Maximum value of the scaled data.
+            epsilon (float): Small offset to prevent numerical instability.
+
+        Returns:
+            np.ndarray: Rescaled data.
+        """
         data_shape = data.shape
         max-=epsilon
         #print(f"pt_index: {self.pt_index}, eta_index: {self.eta_index}, phi_index: {self.phi_index}")
@@ -93,14 +124,18 @@ class CASEDelphesJetDataset(IterableDataset):
         return data_scaled.reshape(data_shape[0], data_shape[1])
     
     
-    def load_and_preprocess_file(self, file_path,inference=False):
-        '''
-        Args: 
-            file_path (str): Path to the .h5 file containing the data.
+    def load_and_preprocess_file(self, file_path:str,inference:bool=False):
+        """
+        Loads and preprocesses a single .h5 file.
+
+        Args:
+            file_path (str): Path to the .h5 file.
+            inference (bool): Whether the data is being loaded for inference.
+
         Returns:
             np.ndarray: Stacked data from both jets.
             np.ndarray: Stacked truth labels.
-        '''
+        """
         
         with h5py.File(file_path, 'r') as file:
             # Read data of shape (N,2,100,3) where N is the number of events, 2 is the number of jets, 100 is the number of particles and 3 is the (eta,phi,pt) of each particle
@@ -132,7 +167,25 @@ class CASEDelphesJetDataset(IterableDataset):
         
         return stacked_data, stacked_labels#,stacked_energies
     
-    def load_for_inference(self):
+    def load_for_inference(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+    Loads data from the specified .h5 files for inference.
+
+    This method processes the jet and event data from the files, ensuring that 
+    only a maximum number of samples specified by `max_samples` are loaded. 
+    It returns separate arrays for the jet features of the two jets in each event,
+    the dijet invariant mass (mjj), and the corresponding truth labels.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: A tuple containing:
+            - jet_array[:,0,:,:] (np.ndarray): Jet features for the first jet in each event, with shape (N, num_particles, 3).
+            - jet_array[:,1,:,:] (np.ndarray): Jet features for the second jet in each event, with shape (N, num_particles, 3).
+            - mjj_array (np.ndarray): Dijet invariant mass values for each event, with shape (N,).
+            - truth_labels (np.ndarray): Ground truth labels for each event, with shape (N,).
+
+    Notes:
+        - This method halves the number of samples from `max_samples` to avoid double counting, because we wish to return 2 jets per event
+    """
         self.max_samples = self.max_samples//2
         mjj_array=[]
         while len(mjj_array)<self.max_samples:
@@ -153,7 +206,10 @@ class CASEDelphesJetDataset(IterableDataset):
         truth_labels=truth_labels[:self.max_samples]
         return jet_array[:,0,:,:],jet_array[:,1,:,:],mjj_array,truth_labels
 
-    def __iter__(self):
+    def __iter__(self)-> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+        '''
+        Iterator that yields batches of data
+        '''
         sample_counter=0
         #self.batch_counter=0
         for file_path in self.filelist:
@@ -192,19 +248,12 @@ class CASEDelphesJetDataset(IterableDataset):
                 else:
                     yield np.array(batch_data,requires_grad=False), np.array(batch_labels,requires_grad=False)
 
-# def collate_fn(samples):
-#     if type(samples[0])==tuple:
-#         X,y=[],[]
-#         for item in samples: X.append(item[0]),y.append(item[1])
-#         X,y=np.array(X),np.array(y).flatten()
-#         return X,y
-#     else: 
-        # return np.array(samples,requires_grad=False)
-    
-def CASEDelphesDataLoader(filelist:list[str]=None,batch_size:int=128, input_shape:tuple[int]=(100, 3),train:bool=True,max_samples:int=5e4):
+def CASEDelphesDataLoader(filelist:List[str]=None,batch_size:int=128, input_shape:tuple[int]=(100, 3),train:bool=True,max_samples:int=5e4) -> DataLoader:
     '''
+    Wrapper function to create a DataLoader for the CASEDelphesJetDataset.
+
     Args:
-        filelist (list[str]): List of file paths to the .h5 files containing the data.
+        filelist (List[str]): List of file paths to the .h5 files containing the data.
         batch_size (int): Number of samples in each batch.
         shuffle_buffer_size (int): Number of samples to shuffle in the buffer.
         input_shape (tuple[int]): Shape of the input data, with the first element being the no. of particles per jet to read and the 2nd typically being (eta,phi,pt).
@@ -215,8 +264,10 @@ def CASEDelphesDataLoader(filelist:list[str]=None,batch_size:int=128, input_shap
     dataset = CASEDelphesJetDataset(filelist=filelist, batch_size=batch_size, input_shape=input_shape,train=train,max_samples=max_samples)
     
     return DataLoader(dataset, batch_size=None)  # None for batch_size since batching is managed by the dataset
-def rescale_and_reshape(data: list[np.ndarray]):
+def rescale_and_reshape(data: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
     '''
+    Rescales and reshapes the input data for jets 1 and 2.
+
     Args: 
         data (np.ndarray): Data of shape [N,2,n_inputs,3] to be rescaled and reshaped.
     Returns:
@@ -235,10 +286,21 @@ def rescale_and_reshape(data: list[np.ndarray]):
     stacked_data[:, :, phi_index] = rescale(stacked_data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=1.0e-4)
     return nnp.split(stacked_data, data_len)[:-1]
 
-def rescale(data, min=0., max=1., epsilon=1.0e-4):
+def rescale(data: np.ndarray, min: float = 0.0, max: float = 1.0, epsilon: float = 1.0e-4) -> np.ndarray:
+    """
+    Rescales the data to a specified range.
+
+    Args:
+        data (np.ndarray): Input data to rescale.
+        min (float): Minimum value of the scaled data.
+        max (float): Maximum value of the scaled data.
+        epsilon (float): Small offset to prevent numerical instability.
+
+    Returns:
+        np.ndarray: Rescaled data.
+    """
     data_shape = data.shape
     max-=epsilon
-    #print(f"pt_index: {self.pt_index}, eta_index: {self.eta_index}, phi_index: {self.phi_index}")
     scaler = MinMaxScaler(feature_range=(min, max))
     data_reshaped = data.flatten()[:, np.newaxis]
     data_scaled = scaler.fit_transform(data_reshaped)
