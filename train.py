@@ -105,7 +105,7 @@ trainer=qc.QuantumTrainer(qAE,lr=args.lr,backend_name=args.backend,init_weights=
 trainer.print_params('Initialized parameters!')
 trainer.set_directories(save_dir)
 if args.evictable:
-    trainer.is_evictable_job()
+    trainer.is_evictable_job(seed=args.seed)
 ### Begin logging ###
 logger.info(f"Training started at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
 logger.info(f'Epochs: {args.epochs} | Learning rate: {args.lr} | Batch size: {args.batch_size} \nBackend: {args.backend} | Wires: {args.wires} | Trash qubits: {args.trash_qubits} | Shots: {args.shots} \n')    
