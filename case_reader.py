@@ -11,10 +11,8 @@ os.environ["PYTHONPATH"]='/work/abal/qae_hep/'
 import helpers.utils as ut
 
 from pennylane import numpy as np
-from typing import List
 
 from sklearn.preprocessing import MinMaxScaler
-from utils import print_events
 import __main__
 import numpy as nnp
 import torch
@@ -235,8 +233,6 @@ def rescale_and_reshape(data: list[np.ndarray]):
     stacked_data[:, :, pt_index] = rescale(stacked_data[:, :, pt_index], min=0., max=1.0, epsilon=1.0e-4)
     stacked_data[:, :, eta_index] = rescale(stacked_data[:, :, eta_index], min=0., max=nnp.pi, epsilon=1.0e-4)
     stacked_data[:, :, phi_index] = rescale(stacked_data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=1.0e-4)
-    #import pdb;pdb.set_trace()
-    import pdb;pdb.set_trace()
     return nnp.split(stacked_data, data_len)[:-1]
 
 def rescale(data, min=0., max=1., epsilon=1.0e-4):
