@@ -33,9 +33,12 @@ To run GPU jobs on an HTCondor cluster, take a look at the scripts in `condor_ex
 To get a description of the possible options, run `python3 train.py --help`
 Notes: 
 - The argument `--seed` (set here to `$RANDOM`) is used to identify a given training run, which is then further described by the text contained in the `--desc` argument.
-- The directories where the input files are stored, and where the results are stored, can be set by modifying `path_dict` located in the python file `helpers/utils.py`. What needs to be changed should be more or less self-explanatory. 
+- The directories where the input files are stored, and where the results are stored, can be set by modifying `path_dict` located in the python file `helpers/path_setter.py`. What needs to be changed should be more or less self-explanatory. Alternatively, use the `set_paths.sh` script (without trailing slashes in the paths) as follows:
+    
+    source set_paths.sh <DATA_DIR> <SAVE_DIR> 
+
 - If `seed = S`, then a new subdirectory is created in the base save directory at the path `/path/to/base/directory/S` and your results are saved there.   
 - The data loader is defined in `case_reader.py`, the quantum circuit architecture is defined in `quantum.architecture` and the loss function is defined in `quantum.losses`. Feel free to modify/add to it!
 
-You can get (a subset of) the training data [here](https://drive.google.com/drive/folders/1fGATNxxcCKPk6mZ54Ucv1mYZteOnh33-?usp=sharing).  
+You can download (a subset of) the training data [here](https://drive.google.com/drive/folders/1fGATNxxcCKPk6mZ54Ucv1mYZteOnh33-?usp=sharing).  
 
