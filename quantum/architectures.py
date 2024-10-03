@@ -264,7 +264,8 @@ class QuantumTrainer():
                     try:
                         # Fetch the seed by splitting the save_dir - last directory in tree should be the seed
                         tmpfile=f"{os.environ['EOS_MGM_URL']}://eos/user/{os.environ['CERN_USERNAME'][0]}/{os.environ['CERN_USERNAME']}/QML/checkpoint_dumps/{self.seed}/{name}"
-                        subprocess.call(f'xrdcp {os.path.join(self.checkpoint_dir,name)} '+tmpfile,shell=True)
+                        exec=os.path.join(os.environ['BELLE2_EXEC'],'xrdcp')
+                        subprocess.call(f'{exec} {os.path.join(self.checkpoint_dir,name)} {tmpfile}',shell=True)
                     except:
                         print("Failed to copy over checkpoints")
                         pass
