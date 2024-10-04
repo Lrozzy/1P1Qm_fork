@@ -2,6 +2,7 @@ from argparse import ArgumentParser
 import os,pathlib
 import subprocess
 parser=ArgumentParser(description='select options to train quantum autoencoder')
+
 parser.add_argument('--seed',default=9999,type=int,help='Some number to index the run')
 parser.add_argument('--train',default=False,action='store_true',help='train the damn network!')
 parser.add_argument('--wires',default=4,type=int,help='number of wires/qubits that the circuit needs to process(AB system)')
@@ -22,7 +23,8 @@ parser.add_argument('--evictable',default=False,action='store_true',help='Set to
 parser.add_argument('--separate_ancilla',default=False,action='store_true',help='Set to true if you want to use 1 ancilla qubit per trash/reference pair')
 parser.add_argument('--desc',default='Training run',help='Set a description for logging purposes')
 parser.add_argument('--n_threads',default='8',type=str)
-parser.add_argument('--jax_use_gpu',default=False,action='store_true')
+parser.add_argument('--save_dir',default='/work/abal/qae_hep/saved_models/',type=str)
+parser.add_argument('--data_dir',default='/storage/9/abal/CASE/delphes/',type=str)
 args=parser.parse_args()
 
 print(f"Using device {args.device_name}")
@@ -51,7 +53,7 @@ print(f"args.trash_qubits: {args.trash_qubits}")
 
 
 if args.save:
-    save_dir=os.path.join(ps.path_dict['QAE_save'],str(args.seed))
+    save_dir=os.path.join(args.save_dir,str(args.seed))
     plot_dir=os.path.join(save_dir,'plots')
     pathlib.Path(plot_dir).mkdir(parents=True,exist_ok=True)
     print("Will save models to: ",save_dir)
@@ -86,15 +88,13 @@ with open(os.path.join(save_dir,'args.txt'),'w+') as f:
 
 
 ### Load the data and create a dataloader ###
-train_filelist=sorted(glob.glob(ps.path_dict['QCD_train']+'/*.h5'))
-val_filelist=sorted(glob.glob(ps.path_dict['QCD_test']+'/*.h5'))
+train_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path('QCD_train'),'*.h5')))
+val_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path('QCD_test'),'*.h5')))
 train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=True,max_samples=train_max_n)
 val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=False,max_samples=valid_max_n) 
 
-
 ### Initialize the optimizer ###
 optimizer=qc.qml.AdamOptimizer(stepsize=args.lr)
-
 
 ### Initialize the trainer ###
 trainer=qc.QuantumTrainer(qAE,lr=args.lr,backend_name=args.backend,init_weights=init_weights,device_name=device_name,\
