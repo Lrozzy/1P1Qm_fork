@@ -6,7 +6,8 @@ Authors: Aritra Bal (KIT Karlsruhe) and Benedikt Maier (Imperial College, London
 
 ## Multi-core Training
 
-Not recommended (see GPU usage below)
+_Not recommended (see GPU usage below)_
+
 To train the autoencoder:
 
     python3 case_qml.py --train --wires 10 \
