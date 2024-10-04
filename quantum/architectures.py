@@ -8,7 +8,7 @@ import pennylane.numpy as np
 import os,pathlib
 import helpers.utils as ut
 import subprocess
-from torch import DataLoader
+from torch.utils.data import DataLoader
 # Global variable initialization
 dev = None
 all_wires=None
