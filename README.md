@@ -6,17 +6,13 @@ Authors: Aritra Bal (KIT Karlsruhe) and Benedikt Maier (Imperial College, London
 
 ## Multi-core Training
 
-_Not recommended (see GPU usage below)_
-
 To train the autoencoder:
 
-    python3 case_qml.py --train --wires 10 \
-    --trash-qubits 7 -b 250 -e 15 --backend autograd --save --seed ${seed} --lr 0.005 --desc "Using arbitrary 3D rotations and 3x weights" \
-    --train_n 75000 --valid_n 15000
+    python3 train.py --train --wires ${QUBITS} --trash-qubits ${TRASH} -b 100 -e 15 --backend "autograd" --save --seed ${seed} --lr 0.005 --desc "'${DESC}'" --train_n ${TRAIN_N} --valid_n ${VALID_N} --save_dir ${SAVE_DIR} --data_dir ${DATA_DIR} --device lightning.kokkos
 
-The example above can be run on multiple cores. Set the device to `kokkos` by passing `--device_name lightning.kokkos` in the arguments. In addition, set the values of the `OMP_PROC_BIND` and `OMP_NUM_THREADS` environment variables **before** you run the python script.
+The example above can be run on multiple cores using the `lightning.kokkos` device. In addition, set the values of the `OMP_PROC_BIND` and `OMP_NUM_THREADS` environment variables **before** you run the python script. 
 
-    export OMP_PROC_BIND=true
+    export OMP_PROC_BIND=spread
     export OMP_NUM_THREADS= <N_THREADS>
 
 In addition, don't forget to set the `PYTHONPATH` environment variable such that it includes the base directory `qae_hep` (or whatever you named it).
@@ -30,10 +26,17 @@ You can use the docker container here:
     docker pull neutrinoman4/qml-lightning.gpu:v3.0
 
 For running on Horeka@KIT (Slurm-based), read the documentation [here](https://www.nhr.kit.edu/userdocs/ftp/containers/).
+
 To run GPU jobs on an HTCondor cluster, take a look at the scripts in `condor_example/`.
 
-The Docker image is derived from the Pennylane Lightning GPU v0.38.0 docker image, and contains additional relevant libraries.
-To run your code, use the `train.py` script as shown below. While this script does almost the same thing as `case_qml.py` does, it is not self-contained. The quantum circuit architecture is loaded from `quantum/architectures.py` and the loss function from `quantum/losses.py`. At the moment, two circuit architectures are defined: `circuit()` and `reuploading_circuit()`. You are free to try out new circuit architectures. The `train.py` method copies the current version of the `architecture.py` file to the `save_dir` as `save_dir/FROZEN_ARCHITECTURE.py`, in case you edit this file in between runs.
+If your HPC cluster supports Singularity/Apptainer, then you may use it as follows: 
+
+     apptainer build qml-lightning-gpu.sif docker://neutrinoman4/qml-lightning.gpu:v3.0
+     apptainer shell qml-lightning-gpu.sif
+
+The Docker image is derived from the Pennylane Lightning GPU v0.38.0 docker image, and contains some additional relevant libraries.
+
+After you're all set up, run your code using the `train.py` script as shown below. The quantum circuit architecture is loaded from `quantum/architectures.py` and the loss function from `quantum/losses.py`. At the moment, two circuit architectures are defined: `circuit()` and `reuploading_circuit()`. You are free to try out new circuit architectures. The `train.py` method copies the current version of the `architecture.py` file to the `save_dir` as `save_dir/FROZEN_ARCHITECTURE.py`, in case you edit this file in between runs.
 
     python3 train.py --train --wires ${QUBITS} --trash-qubits ${TRASH} -b 100 -e 15 --backend "autograd" --save --seed ${seed} --lr 0.005 --desc "'${DESC}'" --train_n ${TRAIN_N} --valid_n ${VALID_N} --save_dir ${SAVE_DIR} --data_dir ${DATA_DIR} --device lightning.gpu
 
