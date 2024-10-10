@@ -1,3 +1,4 @@
+ # pylint: disable=maybe-no-member
 from typing import Optional, Callable, Union, List, Dict, Tuple, Any
 import pennylane as qml
 from helpers.utils import getIndex

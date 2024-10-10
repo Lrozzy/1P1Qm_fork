@@ -1,3 +1,4 @@
+ # pylint: disable=maybe-no-member
 from argparse import ArgumentParser
 import os,pathlib
 import subprocess
@@ -21,6 +22,7 @@ parser.add_argument('--evictable',default=False,action='store_true',help='Set to
                     where jobs are evictable. In that case, it will copy over checkpoints to CERN EOS.\
                      At the moment, set destination manually in architectures.py')
 parser.add_argument('--separate_ancilla',default=False,action='store_true',help='Set to true if you want to use 1 ancilla qubit per trash/reference pair')
+parser.add_argument('--resume',default=False,action='store_true',help='Set to true if you want to resume training from last checkpoint')
 parser.add_argument('--desc',default='Training run',help='Set a description for logging purposes')
 parser.add_argument('--n_threads',default='8',type=str)
 parser.add_argument('--save_dir',default='/work/abal/qae_hep/saved_models/',type=str)
