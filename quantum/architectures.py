@@ -165,12 +165,13 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
     # # QAE Circuit
     
     for item in two_comb_wires:
-        w=item[1] 
-        zenith = inputs[:,w, index['eta']] # corresponding to eta
-        azimuth = inputs[:,w, index['phi']] # corresponding to phi
-        radius = inputs[:,w, index['pt']] # corresponding to pt
-        qml.CRY(radius*zenith,wires=item)
-        qml.CRZ(radius*azimuth,wires=item)
+        qml.CNOT(wires=item)
+        #w=item[1] 
+        # zenith = inputs[:,w, index['eta']] # corresponding to eta
+        # azimuth = inputs[:,w, index['phi']] # corresponding to phi
+        # radius = inputs[:,w, index['pt']] # corresponding to pt
+        # qml.CRY(radius*zenith,wires=item)
+        # qml.CRZ(radius*azimuth,wires=item)
     
 
     for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
