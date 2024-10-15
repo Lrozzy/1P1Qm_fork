@@ -34,7 +34,7 @@ class CASEDelphesJetDataset(IterableDataset):
     """
     def __init__(self, filelist:List[str]=None, batch_size:int=32, max_samples:int=5e4, data_key='jetConstituentsList',\
                  feature_key='eventFeatures',input_shape:tuple[int]=(10, 3),epsilon:float=1.0e-4,train:bool=True,yield_energies=False,\
-                    use_fixed_scaling=False):
+                    use_fixed_scaling=False,normalize_pt=False):
         super().__init__()
         self.filelist = sorted(filelist)
         self.batch_size = batch_size
@@ -42,8 +42,8 @@ class CASEDelphesJetDataset(IterableDataset):
         self.pt_index=ut.getIndex('particle','pt')
         self.eta_index=ut.getIndex('particle','eta')
         self.phi_index=ut.getIndex('particle','phi')
-        self.j1E_index=ut.getIndex('event','j1E')
-        self.j2E_index=ut.getIndex('event','j2E')
+        self.j1pt_index=ut.getIndex('event','j1Pt')
+        self.j2pt_index=ut.getIndex('event','j1Pt')
         self.mjj_index=ut.getIndex('event','mJJ')
         self.use_fixed_scaling=use_fixed_scaling
         self.max_samples = 2*max_samples
@@ -52,7 +52,7 @@ class CASEDelphesJetDataset(IterableDataset):
         self.feature_key=feature_key
         self.train=train
         self.batch_counter=0
-        self.yield_energies=yield_energies
+        self.normalize_pt=normalize_pt
     def rescale(self, data:np.ndarray, min:float=0., max:float=1., epsilon:float=1.0e-4):
         """
         Rescales the data between a given range.
@@ -88,7 +88,7 @@ class CASEDelphesJetDataset(IterableDataset):
         Returns:
             np.ndarray: Rescaled data.
         """
-        limits={'pt':[epsilon,2000.],'eta':[-1.,1.],'phi':[-1.,1.]}
+        limits={'pt':[epsilon,3000.],'eta':[-0.8,0.8],'phi':[-0.8,0.8]}
         if type not in ['pt','eta','phi']:
             raise NameError("Type must be either of [pt,eta,phi]")
         print(f"Using fixed limits: [{limits[type][0]},{limits[type][1]}] for variable {type}")
@@ -115,7 +115,8 @@ class CASEDelphesJetDataset(IterableDataset):
             #jet1_energy=np.array(file[self.feature_key][:,self.j1E_index])
             #jet2_energy=np.array(file[self.feature_key][:,self.j2E_index])
             mjj=np.array(file[self.feature_key][:,self.mjj_index])
-            
+            j1pt=np.array(file[self.feature_key][:,self.j1pt_index])
+            j2pt=np.array(file[self.feature_key][:,self.j2pt_index])
             try:
                 truth_label = np.array(file['truth_label'][()])
             except:
@@ -123,6 +124,9 @@ class CASEDelphesJetDataset(IterableDataset):
                     truth_label = np.zeros(jet_etaphipt.shape[0])
                 else:
                     truth_label = np.ones(jet_etaphipt.shape[0])
+        if self.normalize_pt:
+            jet_etaphipt[:,0,:,self.pt_index]=jet_etaphipt[:,0,:,self.pt_index]/j1pt[:,np.newaxis]
+            jet_etaphipt[:,1,:,self.pt_index]=jet_etaphipt[:,1,:,self.pt_index]/j2pt[:,np.newaxis]
         if inference:
             return jet_etaphipt,mjj,truth_label
         
@@ -131,15 +135,16 @@ class CASEDelphesJetDataset(IterableDataset):
         stacked_labels = np.concatenate([truth_label, truth_label], axis=0)
         #stacked_energies = np.concatenate([jet1_energy, jet2_energy], axis=0)
         if self.use_fixed_scaling:
-            stacked_data[:, :, self.pt_index] = self.fixed_rescale(stacked_data[:, :, self.pt_index], min=0., max=1.0, epsilon=self.epsilon,type='pt')
+            print("Using fixed scaling")
+            #stacked_data[:, :, self.pt_index] = self.fixed_rescale(stacked_data[:, :, self.pt_index], min=0., max=1.0, epsilon=self.epsilon,type='pt')
             stacked_data[:, :, self.eta_index] = self.fixed_rescale(stacked_data[:, :, self.eta_index], min=0., max=np.pi, epsilon=self.epsilon,type='eta')
             stacked_data[:, :, self.phi_index] = self.fixed_rescale(stacked_data[:, :, self.phi_index], min=-np.pi, max=np.pi, epsilon=self.epsilon,type='phi')
             
         else:
-            stacked_data[:, :, self.pt_index] = self.rescale(stacked_data[:, :, self.pt_index], min=0., max=1.0, epsilon=self.epsilon)
-            stacked_data[:, :, self.eta_index] = self.rescale(stacked_data[:, :, self.eta_index], min=0., max=np.pi, epsilon=self.epsilon)
+            #stacked_data[:, :, self.pt_index] = self.rescale(stacked_data[:, :, self.pt_index], min=0., max=1.0, epsilon=self.epsilon)
+            stacked_data[:, :, self.eta_index] = self.rescale(stacked_data[:, :, self.eta_index], min=-np.pi, max=np.pi, epsilon=self.epsilon)
             stacked_data[:, :, self.phi_index] = self.rescale(stacked_data[:, :, self.phi_index], min=-np.pi, max=np.pi, epsilon=self.epsilon)
-            
+        print("sample max pt: ",np.max(stacked_data[:,:,self.pt_index]))
         return stacked_data, stacked_labels#,stacked_energies
     
     def load_for_inference(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -224,7 +229,7 @@ class CASEDelphesJetDataset(IterableDataset):
                     yield np.array(batch_data,requires_grad=False), np.array(batch_labels,requires_grad=False)
 
 def CASEDelphesDataLoader(filelist:List[str]=None,batch_size:int=128, input_shape:tuple[int]=(100, 3),\
-    train:bool=True,max_samples:int=5e4,use_fixed_scaling=False) -> DataLoader:
+    train:bool=True,max_samples:int=5e4,use_fixed_scaling:bool=False,normalize_pt:bool=False) -> DataLoader:
     '''
     Wrapper function to create a DataLoader for the CASEDelphesJetDataset.
 
@@ -237,9 +242,67 @@ def CASEDelphesDataLoader(filelist:List[str]=None,batch_size:int=128, input_shap
         DataLoader: Torch DataLoader object that yields batches of data.
     '''
     print(f"Will read only first {input_shape[0]} particles per jet")
-    dataset = CASEDelphesJetDataset(filelist=filelist, batch_size=batch_size, input_shape=input_shape,train=train,max_samples=max_samples,use_fixed_scaling=use_fixed_scaling)
+    dataset = CASEDelphesJetDataset(filelist=filelist, batch_size=batch_size, input_shape=input_shape,train=train,\
+                                    max_samples=max_samples,use_fixed_scaling=use_fixed_scaling,normalize_pt=normalize_pt)
     
     return DataLoader(dataset, batch_size=None)  # None for batch_size since batching is managed by the dataset
+
+
+def fixed_rescale(data: np.ndarray, min: float = 0.0, max: float = 1.0, epsilon: float = 1.0e-4, type='pt') -> np.ndarray:
+    """
+    Rescales the data to a specified range. 
+    Does not use sample min/max values, but fixed values instead.
+
+    Args:
+        data (np.ndarray): Input data to rescale.
+        min (float): Minimum value of the scaled data.
+        max (float): Maximum value of the scaled data.
+        epsilon (float): Small offset to prevent numerical instability.
+
+    Returns:
+        np.ndarray: Rescaled data.
+    """
+    limits={'pt':[epsilon,2000.],'eta':[-1.,1.],'phi':[-1.,1.]}
+    if type not in ['pt','eta','phi']:
+        raise NameError("Type must be either of [pt,eta,phi]")
+    
+    data_shape = data.shape
+    data_scaled = (data - limits[type][0])/(limits[type][1]-limits[type][0])*max + min # scale using fixed values of 
+    return data_scaled.reshape(data_shape[0], data_shape[1])
+
+def fixed_rescale_and_reshape(data: np.ndarray)-> np.ndarray:
+    '''
+    Rescales the input data for a given jet PFCand array.
+
+    Args: 
+        data (np.ndarray): Data of shape [N,n_inputs,3] to be rescaled
+    Returns:
+        np.ndarray: Data rescaled for the input jet array
+        Note that the rescaling is performed with a fixed max/min value for each variable
+    '''
+    pt_index=ut.getIndex('particle','pt')
+    eta_index=ut.getIndex('particle','eta')
+    phi_index=ut.getIndex('particle','phi')
+    
+    data[:, :, pt_index] = fixed_rescale(data[:, :, pt_index], min=0., max=1.0, epsilon=1.0e-4)
+    data[:, :, eta_index] = fixed_rescale(data[:, :, eta_index], min=0., max=nnp.pi, epsilon=1.0e-4)
+    data[:, :, phi_index] = fixed_rescale(data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=1.0e-4)
+    return data
+
+
+
+
+
+
+
+
+
+
+
+########## REDUNDANT STUFF ############
+
+
+
 def rescale_and_reshape(data: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
     '''
     Rescales and reshapes the input data for jets 1 and 2.
@@ -280,26 +343,4 @@ def rescale(data: np.ndarray, min: float = 0.0, max: float = 1.0, epsilon: float
     scaler = MinMaxScaler(feature_range=(min, max))
     data_reshaped = data.flatten()[:, np.newaxis]
     data_scaled = scaler.fit_transform(data_reshaped)
-    return data_scaled.reshape(data_shape[0], data_shape[1])
-
-def fixed_rescale(data: np.ndarray, min: float = 0.0, max: float = 1.0, epsilon: float = 1.0e-4, type='pt') -> np.ndarray:
-    """
-    Rescales the data to a specified range.
-
-    Args:
-        data (np.ndarray): Input data to rescale.
-        min (float): Minimum value of the scaled data.
-        max (float): Maximum value of the scaled data.
-        epsilon (float): Small offset to prevent numerical instability.
-
-    Returns:
-        np.ndarray: Rescaled data.
-    """
-    limits={'pt':[epsilon,2000.],'eta':[-1.,1.],phi:[-1.,1.]}
-    if type not in ['pt','eta','phi']:
-        raise NameError("Type must be either of [pt,eta,phi]")
-    
-    data_shape = data.shape
-    data_reshaped = data.flatten()
-    data_scaled = (data - limits[type][0])/(limits[type][1]-limits[type][0]) # scale using fixed values of 
     return data_scaled.reshape(data_shape[0], data_shape[1])
