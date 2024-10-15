@@ -91,8 +91,10 @@ with open(os.path.join(save_dir,'args.txt'),'w+') as f:
 ### Load the data and create a dataloader ###
 train_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path('QCD_train'),'*.h5')))
 val_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path('QCD_test'),'*.h5')))
-train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=True,max_samples=train_max_n,use_fixed_scaling=True)
-val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=False,max_samples=valid_max_n,use_fixed_scaling=True) 
+train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=True\
+                                        ,max_samples=train_max_n,use_fixed_scaling=True,normalize_pt=True)
+val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=False,\
+                                      max_samples=valid_max_n,use_fixed_scaling=True,normalize_pt=True) 
 
 ### Initialize the optimizer ###
 optimizer=qc.qml.AdamOptimizer(stepsize=args.lr)
