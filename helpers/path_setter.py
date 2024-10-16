@@ -31,6 +31,7 @@ path_dict:dict[str:str]={'QCD_train':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideban
         'QCD_test':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/test/',
         'QCD_SR':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_signalregion_parts/',
         'QCD_lib':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/library/',
+        'QCD_flat':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/flat_train/',
         'grav_1p5_narrow':'grav_1p5_na/',
         'grav_2p5_narrow':'grav_2p5_na/',
         'grav_3p5_narrow':'grav_3p5_na/',
