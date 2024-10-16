@@ -110,15 +110,13 @@ else:
                                                                                 max_samples=read_n).load_for_inference()
     sig_j1_etaphipt,sig_j2_etaphipt,sig_mjj,sig_labels=cr.CASEDelphesJetDataset(filelist=sig_files,input_shape=(len(qc.auto_wires),3),\
                                                                                 max_samples=10000).load_for_inference()
-    fqcd_j1_etaphipt=cr.fixed_rescale_and_reshape(qcd_j1_etaphipt)
-    fqcd_j2_etaphipt=cr.fixed_rescale_and_reshape(qcd_j2_etaphipt)
-    fsig_j1_etaphipt=cr.fixed_rescale_and_reshape(sig_j1_etaphipt)
-    fsig_j2_etaphipt=cr.fixed_rescale_and_reshape(sig_j2_etaphipt)
-    qcd_j1_etaphipt,qcd_j2_etaphipt,sig_j1_etaphipt,sig_j2_etaphipt=cr.rescale_and_reshape([qcd_j1_etaphipt,qcd_j2_etaphipt,sig_j1_etaphipt,sig_j2_etaphipt])
+    qcd_j1_etaphipt=cr.fixed_rescale_and_reshape(qcd_j1_etaphipt)
+    qcd_j2_etaphipt=cr.fixed_rescale_and_reshape(qcd_j2_etaphipt)
+    sig_j1_etaphipt=cr.fixed_rescale_and_reshape(sig_j1_etaphipt)
+    sig_j2_etaphipt=cr.fixed_rescale_and_reshape(sig_j2_etaphipt)
     
     qcd_costs_j1,qcd_fids_j1=qAE.run_inference(qcd_j1_etaphipt,loss_fn=semi_classical_cost)
-    fqcd_costs_j1,fqcd_fids_j1=qAE.run_inference(fqcd_j1_etaphipt,loss_fn=semi_classical_cost)
-    import pdb;pdb.set_trace()
+    
     sig_costs_j1,sig_fids_j1=qAE.run_inference(sig_j1_etaphipt,loss_fn=semi_classical_cost)
     qcd_costs_j2,qcd_fids_j2=qAE.run_inference(qcd_j2_etaphipt,loss_fn=semi_classical_cost)
     sig_costs_j2,sig_fids_j2=qAE.run_inference(sig_j2_etaphipt,loss_fn=semi_classical_cost)
