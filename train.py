@@ -65,7 +65,7 @@ if args.resume:
 
 
 else:
-    init_weights=qc.np.random.uniform(0,qc.np.pi,size=(len(qc.auto_wires)*6,), requires_grad=True)
+    ### Initialize the quantum autoencoder ##
     logger.add(os.path.join(args.save_dir,'logs.log'),rotation='10 MB',backtrace=True,diagnose=True,level='DEBUG', mode="w")
     logger.info("########################################### \n\n")
     if args.separate_ancilla:
@@ -81,6 +81,11 @@ else:
 
 args.non_trash=args.wires-args.trash_qubits
 assert args.non_trash>0,'Need strictly positive dimensional compressed representation of input state!'
+qAE=qc.QuantumAutoencoder(wires=args.wires, shots=args.shots, trash_qubits=args.trash_qubits, dev_name=device_name,separate_ancilla=args.separate_ancilla)
+qAE.set_circuit(reuploading=True)
+
+if not args.resume:
+    init_weights=qc.np.random.uniform(0,qc.np.pi,size=(len(qc.auto_wires)*6,), requires_grad=True)
 
 train_max_n=args.train_n
 valid_max_n=args.valid_n
@@ -91,9 +96,7 @@ print(f"args.trash_qubits: {args.trash_qubits}")
 
 # Set device name
 
-### Initialize the quantum autoencoder ##
-qAE=qc.QuantumAutoencoder(wires=args.wires, shots=args.shots, trash_qubits=args.trash_qubits, dev_name=device_name,separate_ancilla=args.separate_ancilla)
-qAE.set_circuit(reuploading=True)
+
 
 cost_fn=loss.batch_semi_classical_cost
 qc.print_training_params()
