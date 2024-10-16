@@ -42,6 +42,15 @@ import quantum.architectures as qc
 import quantum.losses as loss
 import datetime
 
+if args.resume:
+    test_args=ut.Unpickle(os.path.join(args.save_dir,'args.pickle'))
+    import importlib
+    qc=importlib.import_module('saved_models.'+str(args.seed)+'.FROZEN_ARCHITECTURE')
+    args=test_args
+    print("Resuming training from last checkpoint")
+    print("Ignoring all supplied arguments except save directory")
+    print("Using arguments specified in original training run")
+    
 args.non_trash=args.wires-args.trash_qubits
 assert args.non_trash>0,'Need strictly positive dimensional compressed representation of input state!'
 
