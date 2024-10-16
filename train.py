@@ -42,15 +42,43 @@ import quantum.architectures as qc
 import quantum.losses as loss
 import datetime
 
+device_name=args.device_name
+save_dir=os.path.join(args.save_dir,str(args.seed))
+plot_dir=os.path.join(save_dir,'plots')
+pathlib.Path(plot_dir).mkdir(parents=True,exist_ok=True)
+
 if args.resume:
-    test_args=ut.Unpickle(os.path.join(args.save_dir,'args.pickle'))
-    import importlib
-    qc=importlib.import_module('saved_models.'+str(args.seed)+'.FROZEN_ARCHITECTURE')
-    args=test_args
-    print("Resuming training from last checkpoint")
-    print("Ignoring all supplied arguments except save directory")
-    print("Using arguments specified in original training run")
+    test_args=ut.Unpickle(os.path.join(save_dir,'args.pickle'))
+    import importlib;qc=importlib.import_module('saved_models.'+str(args.seed)+'.FROZEN_ARCHITECTURE')
+    model_path=sorted(glob.glob(os.path.join(save_dir,'checkpoints','ep*.pickle')))[-1]
+    init_weights=ut.Unpickle(model_path)
     
+    
+    logger.add(os.path.join(args.save_dir,'logs.log'),rotation='10 MB',backtrace=True,diagnose=True,level='DEBUG', mode="a")
+    logger.info("########################################### \n\n")
+    logger.info(f"Resuming training from last checkpoint at {model_path}")
+    logger.info(f"Using arguments specified in original training run")
+    logger.info(f"Training resumed at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
+    logger.info("Current weights are: ",init_weights)
+    logger.info("\n\n ########################################### \n\n")
+    args=test_args
+
+
+else:
+    init_weights=qc.np.random.uniform(0,qc.np.pi,size=(len(qc.auto_wires)*6,), requires_grad=True)
+    logger.add(os.path.join(args.save_dir,'logs.log'),rotation='10 MB',backtrace=True,diagnose=True,level='DEBUG', mode="w")
+    logger.info("########################################### \n\n")
+    if args.separate_ancilla:
+        logger.info(f"This circuit contains {args.wires+2*args.trash_qubits} qubits")
+    else:
+        logger.info(f"This circuit contains {args.wires+args.trash_qubits+1} qubits")
+    logger.info("\n\n ########################################### \n\n")
+    print("Will save models to: ",save_dir)
+    tmpfile=os.path.join(save_dir,'FROZEN_ARCHITECTURE.py')
+    subprocess.call('cp quantum/architectures.py '+tmpfile,shell=True)
+
+
+
 args.non_trash=args.wires-args.trash_qubits
 assert args.non_trash>0,'Need strictly positive dimensional compressed representation of input state!'
 
@@ -61,34 +89,17 @@ valid_max_n=args.valid_n
 print(f"args.wires: {args.wires}")
 print(f"args.trash_qubits: {args.trash_qubits}")
 
-
-if args.save:
-    save_dir=os.path.join(args.save_dir,str(args.seed))
-    plot_dir=os.path.join(save_dir,'plots')
-    pathlib.Path(plot_dir).mkdir(parents=True,exist_ok=True)
-    print("Will save models to: ",save_dir)
-    tmpfile=os.path.join(save_dir,'FROZEN_ARCHITECTURE.py')
-    subprocess.call('cp quantum/architectures.py '+tmpfile,shell=True)
-
-
-logger.add(os.path.join(save_dir,'logs.log'),rotation='10 MB',backtrace=True,diagnose=True,level='DEBUG', mode="w")
-logger.info("########################################### \n\n")
-if args.separate_ancilla:
-    logger.info(f"This circuit contains {args.wires+2*args.trash_qubits} qubits")
-else:
-    logger.info(f"This circuit contains {args.wires+args.trash_qubits+1} qubits")
-logger.info("\n\n ########################################### \n\n")
 # Set device name
-device_name=args.device_name
+
 ### Initialize the quantum autoencoder ##
-qAE=qc.QuantumAutoencoder(wires=args.wires, shots=args.shots, trash_qubits=args.trash_qubits, dev_name=args.device_name,separate_ancilla=args.separate_ancilla)
+qAE=qc.QuantumAutoencoder(wires=args.wires, shots=args.shots, trash_qubits=args.trash_qubits, dev_name=device_name,separate_ancilla=args.separate_ancilla)
 qAE.set_circuit(reuploading=True)
 
 cost_fn=loss.batch_semi_classical_cost
 qc.print_training_params()
 
 ### Initialize the weights randomly ###
-init_weights=qc.np.random.uniform(0,qc.np.pi,size=(len(qc.auto_wires)*6,), requires_grad=True)
+
 
 
 ### Save initial arguments for logging purposes to a text file ###
@@ -114,12 +125,20 @@ trainer=qc.QuantumTrainer(qAE,lr=args.lr,backend_name=args.backend,init_weights=
                             logger=logger,save=args.save,patience=4,optimizer=optimizer,loss_fn=cost_fn)
 trainer.print_params('Initialized parameters!')
 trainer.set_directories(save_dir)
+
+if args.resume: 
+    trainer.set_current_epoch(ut.get_current_epoch(model_path))
+    logger.info(f"Resuming training from epoch {trainer.current_epoch}")
+else:
+    logger.info(f"Training started at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
+    logger.info(f'Epochs: {args.epochs} | Learning rate: {args.lr} | Batch size: {args.batch_size} \nBackend: {args.backend} | Wires: {args.wires} | Trash qubits: {args.trash_qubits} | Shots: {args.shots} \n')    
+    logger.info(f'Additional information: {args.desc}')
+
 if args.evictable:
     trainer.is_evictable_job(seed=args.seed)
 ### Begin logging ###
-logger.info(f"Training started at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
-logger.info(f'Epochs: {args.epochs} | Learning rate: {args.lr} | Batch size: {args.batch_size} \nBackend: {args.backend} | Wires: {args.wires} | Trash qubits: {args.trash_qubits} | Shots: {args.shots} \n')    
-logger.info(f'Additional information: {args.desc}')
+
+
 
 
 ### Begin training ###

@@ -446,7 +446,15 @@ class QuantumTrainer():
             int: The current epoch number.
         """
         return self.current_epoch
-    
+    def set_current_epoch(self,epoch:int)->None:
+        """
+        Sets the current epoch number if training is resumed from a checkpoint.
+
+        Args:
+            epoch (int): The epoch number to set.
+        """
+        self.current_epoch=epoch+1
+        print("Resume training from epoch:",epoch+1)
     def set_directories(self,save_dir: str) -> None:
         """
         Sets up directories for saving model checkpoints and logs.
