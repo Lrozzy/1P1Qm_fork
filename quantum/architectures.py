@@ -154,27 +154,27 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         qml.CNOT(wires=item)
     
     # Layer 2
-    # for w in auto_wires:
-    #     # Variables named according to spherical coordinate system, it's easier to understand :)    
-    #     radius = inputs[:,w, index['pt']] # corresponding to pt
-    #     azimuth = inputs[:,w, index['phi']] # corresponding to phi
-    #     radius = inputs[:,w, index['pt']] # corresponding to pt
-    #     # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
-    #     qml.RY(radius*zenith, wires=w)   
-    #     qml.RZ(radius*azimuth, wires=w)  
-    # # QAE Circuit
+    for w in auto_wires:
+        # Variables named according to spherical coordinate system, it's easier to understand :)    
+        radius = inputs[:,w, index['pt']] # corresponding to pt
+        azimuth = inputs[:,w, index['phi']] # corresponding to phi
+        radius = inputs[:,w, index['pt']] # corresponding to pt
+        # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
+        qml.RY(radius*zenith, wires=w)   
+        qml.RZ(radius*azimuth, wires=w)  
+    # QAE Circuit
     
     for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
         qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
     
     for item in two_comb_wires:
-        #qml.CNOT(wires=item)
-        w=item[1] 
-        zenith = inputs[:,w, index['eta']] # corresponding to eta
-        azimuth = inputs[:,w, index['phi']] # corresponding to phi
-        radius = inputs[:,w, index['pt']] # corresponding to pt
-        qml.CRY(radius*zenith,wires=item)
-        qml.CRZ(radius*azimuth,wires=item)
+        qml.CNOT(wires=item)
+        # w=item[1] 
+        # zenith = inputs[:,w, index['eta']] # corresponding to eta
+        # azimuth = inputs[:,w, index['phi']] # corresponding to phi
+        # radius = inputs[:,w, index['pt']] # corresponding to pt
+        # qml.CRY(radius*zenith,wires=item)
+        # qml.CRZ(radius*azimuth,wires=item)
     
 
     # for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
