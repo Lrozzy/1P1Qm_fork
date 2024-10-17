@@ -162,7 +162,7 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
         qml.RY(radius*zenith, wires=w)   
         qml.RZ(radius*azimuth, wires=w)  
-    # QAE Circuit
+    
     
     for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
         qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
@@ -179,10 +179,6 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
 
     # for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
     #     qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
-    
-    # for item in two_comb_wires: 
-    #     qml.CNOT(wires=item)
-    
 
     # SWAP test to measure fidelity
     for ref_wire,trash_wire,ancilla in zip(ref_wires,auto_wires[-n_trash_qubits:],ancillary_wires):
