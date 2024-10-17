@@ -14,6 +14,8 @@ import torch
 from torch.utils.data import IterableDataset, DataLoader
 from typing import List, Tuple, Union
 
+eta_lims=ut.feature_limits['eta']
+phi_lims=ut.feature_limits['phi']
 class CASEDelphesJetDataset(IterableDataset):
     """
     Iterable dataset class to load jet data from .h5 files.
@@ -53,19 +55,19 @@ class CASEDelphesJetDataset(IterableDataset):
         self.train=train
         self.batch_counter=0
         self.normalize_pt=normalize_pt
-    def rescale(self, data:np.ndarray, min:float=0., max:float=1., epsilon:float=1.0e-4):
+    def rescale(self, data:np.ndarray, epsilon:float=1.0e-4):
         """
         Rescales the data between a given range.
 
         Args:
             data (np.ndarray): Input data to rescale.
-            min (float): Minimum value of the scaled data.
-            max (float): Maximum value of the scaled data.
             epsilon (float): Small offset to prevent numerical instability.
 
         Returns:
             np.ndarray: Rescaled data.
         """
+        min=ut.feature_limits[type]['min']
+        max=ut.feature_limits[type]['max']
         data_shape = data.shape
         max-=epsilon
         #print(f"pt_index: {self.pt_index}, eta_index: {self.eta_index}, phi_index: {self.phi_index}")
@@ -74,28 +76,30 @@ class CASEDelphesJetDataset(IterableDataset):
         data_scaled = scaler.fit_transform(data_reshaped)
         return data_scaled.reshape(data_shape[0], data_shape[1])
     
-    def fixed_rescale(self,data: np.ndarray,min:int=0.0,max:int=1.0, epsilon: float = 1.0e-4, type='pt') -> np.ndarray:
+    def fixed_rescale(self,data: np.ndarray, epsilon: float = 1.0e-4, type='pt') -> np.ndarray:
         """
         Rescales the data to a specified range. Instead of using the min/max values of the data array,
         uses fixed values instead, which can be modified in the limits array
 
         Args:
             data (np.ndarray): Input data to rescale.
-            min (float): Minimum value of the scaled data.
-            max (float): Maximum value of the scaled data.
             epsilon (float): Small offset to prevent numerical instability.
 
         Returns:
             np.ndarray: Rescaled data.
         """
+        min=ut.feature_limits[type]['min']
+        max=ut.feature_limits[type]['max']
+        max-=epsilon
         limits={'pt':[epsilon,3000.],'eta':[-0.8,0.8],'phi':[-0.8,0.8]}
         if type not in ['pt','eta','phi']:
             raise NameError("Type must be either of [pt,eta,phi]")
-        print(f"Using fixed limits: [{limits[type][0]},{limits[type][1]}] for variable {type}")
+        print(f"Assuming fixed sample maxima: [{limits[type][0]},{limits[type][1]}] for variable {type}")
         data_shape = data.shape
         data_reshaped = data.flatten()
         data_scaled = ((data_reshaped - limits[type][0])/(limits[type][1]-limits[type][0]))*(max-min) + min # scale using fixed values of 
         return data_scaled.reshape(data_shape[0], data_shape[1])
+    
     def load_and_preprocess_file(self, file_path:str,inference:bool=False):
         """
         Loads and preprocesses a single .h5 file.
@@ -127,8 +131,15 @@ class CASEDelphesJetDataset(IterableDataset):
         if self.normalize_pt:
             jet_etaphipt[:,0,:,self.pt_index]=jet_etaphipt[:,0,:,self.pt_index]/j1pt[:,np.newaxis]
             jet_etaphipt[:,1,:,self.pt_index]=jet_etaphipt[:,1,:,self.pt_index]/j2pt[:,np.newaxis]
+        
+        # If you only train, then no need to batch, just return the entire array
         if inference:
-            return jet_etaphipt,mjj,truth_label
+            if self.use_fixed_scaling:
+                jet_etaphipt[:,0,:,self.eta_index]=self.fixed_rescale(jet_etaphipt[:,0,:,self.eta_index], epsilon=self.epsilon,type='eta')
+                jet_etaphipt[:,0,:,self.phi_index]=self.fixed_rescale(jet_etaphipt[:,0,:,self.phi_index], epsilon=self.epsilon,type='phi')
+                jet_etaphipt[:,1,:,self.eta_index]=self.fixed_rescale(jet_etaphipt[:,1,:,self.eta_index], epsilon=self.epsilon,type='eta')
+                jet_etaphipt[:,1,:,self.phi_index]=self.fixed_rescale(jet_etaphipt[:,1,:,self.phi_index], epsilon=self.epsilon,type='phi')
+            return jet_etaphipt,np.stack([mjj,j1pt,j2pt],axis=-1),truth_label
         
         stacked_data = np.reshape(jet_etaphipt,newshape=[-1, jet_etaphipt.shape[2], jet_etaphipt.shape[3]])
         # NOTE: arg newshape is deprecated in numpy>=2.10.0
@@ -137,13 +148,13 @@ class CASEDelphesJetDataset(IterableDataset):
         if self.use_fixed_scaling:
             print("Using fixed scaling")
             #stacked_data[:, :, self.pt_index] = self.fixed_rescale(stacked_data[:, :, self.pt_index], min=0., max=1.0, epsilon=self.epsilon,type='pt')
-            stacked_data[:, :, self.eta_index] = self.fixed_rescale(stacked_data[:, :, self.eta_index], min=0., max=np.pi, epsilon=self.epsilon,type='eta')
-            stacked_data[:, :, self.phi_index] = self.fixed_rescale(stacked_data[:, :, self.phi_index], min=-np.pi, max=np.pi, epsilon=self.epsilon,type='phi')
+            stacked_data[:, :, self.eta_index] = self.fixed_rescale(stacked_data[:, :, self.eta_index], epsilon=self.epsilon,type='eta')
+            stacked_data[:, :, self.phi_index] = self.fixed_rescale(stacked_data[:, :, self.phi_index], epsilon=self.epsilon,type='phi')
             
         else:
             #stacked_data[:, :, self.pt_index] = self.rescale(stacked_data[:, :, self.pt_index], min=0., max=1.0, epsilon=self.epsilon)
-            stacked_data[:, :, self.eta_index] = self.rescale(stacked_data[:, :, self.eta_index], min=-np.pi, max=np.pi, epsilon=self.epsilon)
-            stacked_data[:, :, self.phi_index] = self.rescale(stacked_data[:, :, self.phi_index], min=-np.pi, max=np.pi, epsilon=self.epsilon)
+            stacked_data[:, :, self.eta_index] = self.rescale(stacked_data[:, :, self.eta_index], epsilon=self.epsilon)
+            stacked_data[:, :, self.phi_index] = self.rescale(stacked_data[:, :, self.phi_index], epsilon=self.epsilon)
         print("sample max pt: ",np.max(stacked_data[:,:,self.pt_index]))
         return stacked_data, stacked_labels#,stacked_energies
     
@@ -160,31 +171,31 @@ class CASEDelphesJetDataset(IterableDataset):
         Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: A tuple containing:
             - jet_array[:,0,:,:] (np.ndarray): Jet features for the first jet in each event, with shape (N, num_particles, 3).
             - jet_array[:,1,:,:] (np.ndarray): Jet features for the second jet in each event, with shape (N, num_particles, 3).
-            - mjj_array (np.ndarray): Dijet invariant mass values for each event, with shape (N,).
+            - jetFeatures_array (np.ndarray): (mjj,j1pt,j2pt) values for each event, with shape (N,3).
             - truth_labels (np.ndarray): Ground truth labels for each event, with shape (N,).
 
     Notes:
         - This method halves the number of samples from `max_samples` to avoid double counting, because we wish to return 2 jets per event
     """
         self.max_samples = self.max_samples//2
-        mjj_array=[]
-        while len(mjj_array)<self.max_samples:
+        jetFeatures_array=[]
+        while len(jetFeatures_array)<self.max_samples:
             for i,file_path in enumerate(self.filelist):
-                jet_etaphipt,mjj,truth_label= self.load_and_preprocess_file(file_path,inference=True)
+                jet_etaphipt,jet_features,truth_label= self.load_and_preprocess_file(file_path,inference=True)
                 if i==0:
-                    mjj_array=mjj
+                    jetFeatures_array=jet_features
                     jet_array=jet_etaphipt
                     truth_labels=truth_label
                 else:
-                    mjj_array=np.concatenate([mjj_array,mjj],axis=0)
+                    jetFeatures_array=np.concatenate([jetFeatures_array,jet_features],axis=0)
                     jet_array=np.concatenate([jet_array,jet_etaphipt],axis=0)
                     truth_labels=np.concatenate([truth_labels,truth_label],axis=0)
-                if len(mjj_array)>=self.max_samples:
+                if len(jetFeatures_array)>=self.max_samples:
                     break
         jet_array=jet_array[:self.max_samples]
-        mjj_array=mjj_array[:self.max_samples]
+        jetFeatures_array=jetFeatures_array[:self.max_samples]
         truth_labels=truth_labels[:self.max_samples]
-        return jet_array[:,0,:,:],jet_array[:,1,:,:],mjj_array,truth_labels
+        return jet_array[:,0,:,:],jet_array[:,1,:,:],jetFeatures_array,truth_labels
 
     def __iter__(self)-> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         '''
@@ -267,7 +278,9 @@ def fixed_rescale(data: np.ndarray, min: float = 0.0, max: float = 1.0, epsilon:
         raise NameError("Type must be either of [pt,eta,phi]")
     
     data_shape = data.shape
-    data_scaled = (data - limits[type][0])/(limits[type][1]-limits[type][0])*max + min # scale using fixed values of 
+    data_scaled = ((data - limits[type][0])/(limits[type][1]-limits[type][0]))*(max-min) + min # scale using fixed values of 
+    #import pdb;pdb.set_trace()
+        
     return data_scaled.reshape(data_shape[0], data_shape[1])
 
 def fixed_rescale_and_reshape(data: np.ndarray)-> np.ndarray:
@@ -285,8 +298,8 @@ def fixed_rescale_and_reshape(data: np.ndarray)-> np.ndarray:
     phi_index=ut.getIndex('particle','phi')
     
     data[:, :, pt_index] = fixed_rescale(data[:, :, pt_index], min=0., max=1.0, epsilon=1.0e-4)
-    data[:, :, eta_index] = fixed_rescale(data[:, :, eta_index], min=0., max=nnp.pi, epsilon=1.0e-4)
-    data[:, :, phi_index] = fixed_rescale(data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=1.0e-4)
+    data[:, :, eta_index] = fixed_rescale(data[:, :, eta_index], min=0., max=nnp.pi, epsilon=0,type='eta')
+    data[:, :, phi_index] = fixed_rescale(data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=0,type='phi')
     return data
 
 
@@ -321,8 +334,8 @@ def rescale_and_reshape(data: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]
     
     stacked_data = nnp.concatenate(data, axis=0)
     stacked_data[:, :, pt_index] = rescale(stacked_data[:, :, pt_index], min=0., max=1.0, epsilon=1.0e-4)
-    stacked_data[:, :, eta_index] = rescale(stacked_data[:, :, eta_index], min=0., max=nnp.pi, epsilon=1.0e-4)
-    stacked_data[:, :, phi_index] = rescale(stacked_data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=1.0e-4)
+    stacked_data[:, :, eta_index] = rescale(stacked_data[:, :, eta_index], min=-np.pi, max=nnp.pi, epsilon=0)
+    stacked_data[:, :, phi_index] = rescale(stacked_data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=0)
     return nnp.split(stacked_data, data_len)[:-1]
 
 def rescale(data: np.ndarray, min: float = 0.0, max: float = 1.0, epsilon: float = 1.0e-4) -> np.ndarray:
