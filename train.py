@@ -25,6 +25,7 @@ parser.add_argument('--separate_ancilla',default=False,action='store_true',help=
 parser.add_argument('--resume',default=False,action='store_true',help='Set to true if you want to resume training from last checkpoint')
 parser.add_argument('--desc',default='Training run',help='Set a description for logging purposes')
 parser.add_argument('--n_threads',default='8',type=str)
+parser.add_argument('--norm_pt',default=False,action='store_true')
 parser.add_argument('--save_dir',default='/work/abal/qae_hep/saved_models/',type=str)
 parser.add_argument('--data_dir',default='/storage/9/abal/CASE/delphes/',type=str)
 args=parser.parse_args()
@@ -80,6 +81,7 @@ else:
     subprocess.call('cp quantum/architectures.py '+tmpfile,shell=True)
 
 
+logger.info("Feature are scaled to the limits: ",ut.feature_limits)
 
 args.non_trash=args.wires-args.trash_qubits
 assert args.non_trash>0,'Need strictly positive dimensional compressed representation of input state!'
@@ -118,13 +120,13 @@ if args.flat:
     data_key='QCD_flat'
 else:
     data_key='QCD_train'
-logger.info(f'loading data from {ps.PathSetter(data_path=args.data_dir).get_data_path('data_key')}')
-train_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path('data_key'),'*.h5')))
+logger.info(f'loading data from {ps.PathSetter(data_path=args.data_dir).get_data_path(data_key)}')
+train_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path(data_key),'*.h5')))
 val_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path('QCD_test'),'*.h5')))
 train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=True\
-                                        ,max_samples=train_max_n,use_fixed_scaling=True,normalize_pt=True)
+                                        ,max_samples=train_max_n,use_fixed_scaling=args.norm_pt,normalize_pt=args.norm_pt)
 val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=False,\
-                                      max_samples=valid_max_n,use_fixed_scaling=True,normalize_pt=True) 
+                                      max_samples=valid_max_n,use_fixed_scaling=args.norm_pt,normalize_pt=args.norm_pt) 
 
 ### Initialize the optimizer ###
 optimizer=qc.qml.AdamOptimizer(stepsize=args.lr)
