@@ -43,7 +43,7 @@ class CASEDelphesJetDataset(IterableDataset):
         self.eta_index=ut.getIndex('particle','eta')
         self.phi_index=ut.getIndex('particle','phi')
         self.j1pt_index=ut.getIndex('event','j1Pt')
-        self.j2pt_index=ut.getIndex('event','j1Pt')
+        self.j2pt_index=ut.getIndex('event','j2Pt') # Bug fix
         self.mjj_index=ut.getIndex('event','mJJ')
         self.use_fixed_scaling=use_fixed_scaling
         self.max_samples = 2*max_samples
