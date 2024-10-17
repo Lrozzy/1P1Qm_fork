@@ -133,3 +133,4 @@ eventFeatureNames:list[str]=['mJJ', 'j1Pt', 'j1Eta', 'j1Phi', 'j1M', 'j1E', 'j2P
 
 particleFeatureNames:list[str]=['eta', 'phi', 'pt']
 
+feature_limits={'eta':{'min':0,'max':nnp.pi},'phi':{'min':-nnp.pi,'max':nnp.pi}}
