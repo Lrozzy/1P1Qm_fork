@@ -82,7 +82,7 @@ except:
 fid_dict={}
 
 
-
+print("Feature are scaled to the limits: ",ut.feature_limits)
 # test_loader=cr.CASEDelphesDataLoader(filelist=sorted(glob.glob(ps.path_dict['QCD_lib']+'/*.h5')),batch_size=1000,\
 #                                      input_shape=(len(qc.auto_wires),3),train=False,max_samples=read_n,which=which)  # Shuffle is set to False
 # sig_loader=cr.CASEDelphesDataLoader(filelist=sorted(glob.glob(ps.path_dict['grav_4p5_narrow']+'/*.h5')),batch_size=1000,\
@@ -109,7 +109,8 @@ else:
     qcd_j1_etaphipt,qcd_j2_etaphipt,qcd_mjj,qcd_labels=cr.CASEDelphesJetDataset(filelist=qcd_files,input_shape=(len(qc.auto_wires),3),\
                                                                                 max_samples=read_n).load_for_inference()
     sig_j1_etaphipt,sig_j2_etaphipt,sig_mjj,sig_labels=cr.CASEDelphesJetDataset(filelist=sig_files,input_shape=(len(qc.auto_wires),3),\
-                                                                                max_samples=10000).load_for_inference()
+                                                                                max_samples=5000).load_for_inference()
+    #import pdb;pdb.set_trace()
     qcd_j1_etaphipt=cr.fixed_rescale_and_reshape(qcd_j1_etaphipt)
     qcd_j2_etaphipt=cr.fixed_rescale_and_reshape(qcd_j2_etaphipt)
     sig_j1_etaphipt=cr.fixed_rescale_and_reshape(sig_j1_etaphipt)
@@ -145,7 +146,7 @@ sig_labels=nnp.ones(sig_fids.shape[0])
 labels=nnp.concatenate([qcd_labels,sig_labels],axis=0)
 fids=nnp.concatenate([qcd_fids,sig_fids],axis=0)
 costs=nnp.concatenate([qcd_costs,sig_costs],axis=0) 
-mjj=nnp.concatenate([qcd_mjj,sig_mjj],axis=0)
+mjj=nnp.concatenate([qcd_mjj[:,0],sig_mjj[:,0]],axis=0)
 
 #scaler = MinMaxScaler(feature_range=(0, 1.))
 #costs=scaler.fit_transform(costs.reshape(-1,1)).flatten()
