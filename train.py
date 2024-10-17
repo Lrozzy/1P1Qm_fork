@@ -3,7 +3,7 @@ import os,pathlib
 import subprocess
 parser=ArgumentParser(description='select options to train quantum autoencoder')
 
-parser.add_argument('--seed',default=9999,type=int,help='Some number to index the run')
+parser.add_argument('--seed',default='9999',type=str,help='Something to index the run')
 parser.add_argument('--train',default=False,action='store_true',help='train the damn network!')
 parser.add_argument('--wires',default=4,type=int,help='number of wires/qubits that the circuit needs to process(AB system)')
 parser.add_argument('--trash-qubits',default=1,type=int,help='number of qubits defining the B system, or the reference and trash states!')
@@ -17,6 +17,7 @@ parser.add_argument('--device_name',default='default.qubit',help='device name fo
     to set the OMP_PROC_BIND and OMP_NUM_THREADS environment variables')
 parser.add_argument('--lr',default=0.01,type=float)
 parser.add_argument('--save',default=False,action='store_true',help='Set to true to save the model')
+parser.add_argument('--flat',default=False,action='store_true',help='Set to true to use flat mjj dist. for training')
 parser.add_argument('--evictable',default=False,action='store_true',help='Set to true if you are running on a cluster \
                     where jobs are evictable. In that case, it will copy over checkpoints to CERN EOS.\
                      At the moment, set destination manually in architectures.py')
@@ -43,13 +44,13 @@ import quantum.losses as loss
 import datetime
 
 device_name=args.device_name
-save_dir=os.path.join(args.save_dir,str(args.seed))
+save_dir=os.path.join(args.save_dir,args.seed)
 plot_dir=os.path.join(save_dir,'plots')
 pathlib.Path(plot_dir).mkdir(parents=True,exist_ok=True)
 
 if args.resume:
     test_args=ut.Unpickle(os.path.join(save_dir,'args.pickle'))
-    import importlib;qc=importlib.import_module('saved_models.'+str(args.seed)+'.FROZEN_ARCHITECTURE')
+    import importlib;qc=importlib.import_module('saved_models.'+args.seed+'.FROZEN_ARCHITECTURE')
     model_path=sorted(glob.glob(os.path.join(save_dir,'checkpoints','ep*.pickle')))[-1]
     init_weights=ut.Unpickle(model_path)
     
@@ -62,6 +63,7 @@ if args.resume:
     logger.info("Current weights are: ",init_weights)
     logger.info("\n\n ########################################### \n\n")
     args=test_args
+    args.seed=str(args.seed)
 
 
 else:
@@ -112,7 +114,12 @@ with open(os.path.join(save_dir,'args.txt'),'w+') as f:
 
 
 ### Load the data and create a dataloader ###
-train_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path('QCD_flat'),'*.h5')))
+if args.flat:
+    data_key='QCD_flat'
+else:
+    data_key='QCD_train'
+logger.info(f'loading data from {ps.PathSetter(data_path=args.data_dir).get_data_path('data_key')}')
+train_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path('data_key'),'*.h5')))
 val_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path('QCD_test'),'*.h5')))
 train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=True\
                                         ,max_samples=train_max_n,use_fixed_scaling=True,normalize_pt=True)
