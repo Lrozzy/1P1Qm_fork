@@ -3,7 +3,7 @@ import os,pathlib,glob
 from numthreads import omp_num_threads
 
 parser=ArgumentParser(description='select options to train quantum autoencoder')
-parser.add_argument('--seed',default=9999,type=int,help='Some number to index the run')
+parser.add_argument('--seed',default=9999,type=str,help='Some number to index the run')
 parser.add_argument('--read_n',default=10000,type=int,help='No. of test events to read in')
 parser.add_argument('--epoch_n',default=1,type=int,help='If you want to load some checkpoint at epoch N')
 parser.add_argument('--dump',default='/ceph/abal/QML/dumps',help='Dump the results to a directory')
@@ -81,8 +81,8 @@ except:
     print("Did not find history file. Skipping, its not important except for statistics.")
 fid_dict={}
 
-
-print("Feature are scaled to the limits: ",ut.feature_limits)
+# if args.norm_pt:
+#     print("Feature are scaled to the limits: ",ut.feature_limits)
 # test_loader=cr.CASEDelphesDataLoader(filelist=sorted(glob.glob(ps.path_dict['QCD_lib']+'/*.h5')),batch_size=1000,\
 #                                      input_shape=(len(qc.auto_wires),3),train=False,max_samples=read_n,which=which)  # Shuffle is set to False
 # sig_loader=cr.CASEDelphesDataLoader(filelist=sorted(glob.glob(ps.path_dict['grav_4p5_narrow']+'/*.h5')),batch_size=1000,\
@@ -105,11 +105,12 @@ if args.load:
 else:
     paths=ps.PathSetter(data_path='/storage/9/abal/CASE/delphes')
     qcd_files=sorted(glob.glob(paths.get_data_path('QCD_SR')+'/*.h5'))
+    import pdb;pdb.set_trace()
     sig_files=sorted(glob.glob(paths.get_data_path(args.signal)+'/*.h5'))
     qcd_j1_etaphipt,qcd_j2_etaphipt,qcd_mjj,qcd_labels=cr.CASEDelphesJetDataset(filelist=qcd_files,input_shape=(len(qc.auto_wires),3),\
                                                                                 max_samples=read_n).load_for_inference()
     sig_j1_etaphipt,sig_j2_etaphipt,sig_mjj,sig_labels=cr.CASEDelphesJetDataset(filelist=sig_files,input_shape=(len(qc.auto_wires),3),\
-                                                                                max_samples=5000).load_for_inference()
+                                                                                max_samples=2000).load_for_inference()
     #import pdb;pdb.set_trace()
     qcd_j1_etaphipt=cr.fixed_rescale_and_reshape(qcd_j1_etaphipt)
     qcd_j2_etaphipt=cr.fixed_rescale_and_reshape(qcd_j2_etaphipt)
