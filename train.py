@@ -26,6 +26,7 @@ parser.add_argument('--resume',default=False,action='store_true',help='Set to tr
 parser.add_argument('--desc',default='Training run',help='Set a description for logging purposes')
 parser.add_argument('--n_threads',default='8',type=str)
 parser.add_argument('--norm_pt',default=False,action='store_true')
+parser.add_argument('--no_reuploading',action='store_false',default=True)
 parser.add_argument('--save_dir',default='/work/abal/qae_hep/saved_models/',type=str)
 parser.add_argument('--data_dir',default='/storage/9/abal/CASE/delphes/',type=str)
 args=parser.parse_args()
@@ -81,12 +82,19 @@ else:
     subprocess.call('cp quantum/architectures.py '+tmpfile,shell=True)
 
 
-logger.info("Feature are scaled to the limits: ",ut.feature_limits)
+logger.info(f"Feature are scaled assuming the following sample maxima: {ut.feature_limits}")
+
+if args.norm_pt:
+    logger.info(f"pT will not be scaled to the above limit. Will be normalized using 1/jet_pt")
+else:
+    logger.info(f"pT will also be scaled assuming above maxima")
+if args.flat:
+    logger.info("Using flat mjj distribution for training")
 
 args.non_trash=args.wires-args.trash_qubits
 assert args.non_trash>0,'Need strictly positive dimensional compressed representation of input state!'
 qAE=qc.QuantumAutoencoder(wires=args.wires, shots=args.shots, trash_qubits=args.trash_qubits, dev_name=device_name,separate_ancilla=args.separate_ancilla)
-qAE.set_circuit(reuploading=True)
+qAE.set_circuit(reuploading=args.no_reuploading)
 
 if not args.resume:
     init_weights=qc.np.random.uniform(0,qc.np.pi,size=(len(qc.auto_wires)*6,), requires_grad=True)
