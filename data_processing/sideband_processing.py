@@ -23,6 +23,8 @@ def process_sideband(filename):
         side_jj=f['eventFeatures'][()]
         side_pf=f['jetConstituentsList'][()] # Shape: (N,2,100,3)
     
+    sf_names=np.array(['sj1Pt','sj1Eta','sj1Phi','sj1E','sj2Pt','sj2Eta','sj2Phi','sj2E'],dtype=dt)
+    
     localfile = filename.split("/")[-1].replace('.h5','')
     
     outfile = os.path.join(outfolder,localfile+'.h5')
@@ -44,23 +46,22 @@ def process_sideband(filename):
     side_pf_pxpypzE[...,2]=side_pf[...,2]*np.sinh(side_pf[...,0])
     side_pf_pxpypzE[...,3]=np.sqrt(side_pf_pxpypzE[...,0]**2+side_pf_pxpypzE[...,1]**2+side_pf_pxpypzE[...,2]**2)
     
-    jet_PFCands,jet_labels, mask, num_PFCands_subleading_jet=pf.uncluster(side_pf_pxpypzE,min_pt=jPt)
+    jet_PFCands,evt_subjet_idx, mask, num_PFCands_subleading_jet,evt_subjet_features,evt_subjet_labels=pf.uncluster(side_pf_pxpypzE,min_pt=jPt,test=False)
     
     # For jets with more than NUM_SELECTED_PFCANDS//2 PFCands in the subleading jet, we only consider the NUM_SELECTED_PFCANDS//2 leading PFCands
     # If less, then set mask to NUM_SELECTED_PFCANDS - num_PFCands_subleading_jet
     # The jet labels array contains PFCand labels starting from 0 for both leading and subleading jets
     # Something like: [0,1,2,3,4,5,.....,50,0,1,2,......34,999,999,999...] assuming that subjet 1 has 50 PFCands and subjet 2 has 34 PFCands, followed by zero padding to make the shape 100
-    # Now applying the mask as jet_labels<mask_limit[:,None] will allow us to select only the leading NUM_SELECTED_PFCANDS//2 PFCands of each sub-jet, and if the subleading jet
+    # Now applying the mask as evt_subjet_idx<mask_limit[:,None] will allow us to select only the leading NUM_SELECTED_PFCANDS//2 PFCands of each sub-jet, and if the subleading jet
     # has less than NUM_SELECTED_PFCANDS//2 PFCands, then we select the balance PFCands from the leading jet
 
     #mask_limit=np.where(num_PFCands_subleading_jet>NUM_SELECTED_PFCANDS//2,NUM_SELECTED_PFCANDS//2,NUM_SELECTED_PFCANDS-num_PFCands_subleading_jet)
     
-    #pf_mask=jet_labels<mask_limit[...,None]
+    #pf_mask=evt_subjet_idx<mask_limit[...,None]
     side_jj=side_jj[mask]
     side_truth=np.zeros_like(side_jj[:,0])
-        
-        #
-    side_truth=np.zeros_like(side_jj[:,0])
+    #import pdb;pdb.set_trace()
+
     with h5py.File(outfile, 'w') as side_hf:
         side_hf.create_dataset('particleFeatures', data=jet_PFCands)
         side_hf.create_dataset('eventFeatures', data=side_jj)
@@ -69,13 +70,20 @@ def process_sideband(filename):
         side_hf.create_dataset('truth_label', data=side_truth)
         side_hf.create_dataset('truth_label_shape', data=side_truth.shape)
         side_hf.create_dataset('num_PFCands_subleading_jet',data=num_PFCands_subleading_jet)
-        side_hf.create_dataset('PFCand_subjet_labels',data=jet_labels)
-    
+        side_hf.create_dataset('PFCand_subjet_idx',data=evt_subjet_idx)
+        side_hf.create_dataset('subjet_features',data=evt_subjet_features)
+        side_hf.create_dataset('subjet_feature_names',data=sf_names)
+
     print("\n\n#### DONE #####\n\n")
 
 if __name__ == '__main__':
+    multi=True
     file_paths=glob.glob('/ceph/bmaier/CASE/delphes/events/qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/*.h5')
-    num_cores=min(len(file_paths), os.cpu_count()//2)
-    print(f"Will use {num_cores} cores to process {len(file_paths)} files")
-    pool = Pool(num_cores);sleep(3)
-    pool.map(process_sideband, file_paths) 
+    if multi:
+        num_cores=min(len(file_paths), 8)
+        print(f"Will use {num_cores} cores to process {len(file_paths)} files")
+        pool = Pool(num_cores);sleep(3)
+        pool.map(process_sideband, file_paths) 
+    else:
+        for filename in file_paths:
+            process_sideband(filename)

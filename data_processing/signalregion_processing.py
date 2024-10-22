@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import processing_functions as pf
 from multiprocessing import Pool
 from time import sleep
-
+signal='AtoHZ'#'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_signalregion_parts'#
 def process_signal_region(filename):
     dt = h5py.special_dtype(vlen=str)
     ipath='/web/abal/public_html/debug/'
@@ -24,7 +24,8 @@ def process_signal_region(filename):
         dEta=f["eventFeatures"][()][:,9]
         signal_jj=f['eventFeatures'][()]
         signal_pf=f['jetConstituentsList'][()] # Shape: (N,2,100,3)
-
+    sf_names=np.array(['sj1Pt','sj1Eta','sj1Phi','sj1E','sj2Pt','sj2Eta','sj2Phi','sj2E'],dtype=dt)
+    
     localfile = filename.split("/")[-1].replace('.h5','')
     print(f'Reading: {localfile}')
     res_type='na'
@@ -60,20 +61,20 @@ def process_signal_region(filename):
     signal_pf_pxpypzE[...,1]=signal_pf[...,2]*np.sin(signal_pf[...,1])
     signal_pf_pxpypzE[...,2]=signal_pf[...,2]*np.sinh(signal_pf[...,0])
     signal_pf_pxpypzE[...,3]=np.sqrt(signal_pf_pxpypzE[...,0]**2+signal_pf_pxpypzE[...,1]**2+signal_pf_pxpypzE[...,2]**2)
-    jet_PFCands,jet_labels, mask, num_PFCands_subleading_jet=pf.uncluster(signal_pf_pxpypzE,min_pt=jPt)
+    jet_PFCands,evt_subjet_idx, mask, num_PFCands_subleading_jet,evt_subjet_features,evt_subjet_labels=pf.uncluster(signal_pf_pxpypzE,min_pt=jPt,test=False)
     # For jets with more than NUM_SELECTED_PFCANDS//2 PFCands in the subleading jet, we only consider the NUM_SELECTED_PFCANDS//2 leading PFCands
     # If less, then set mask to NUM_SELECTED_PFCANDS - num_PFCands_subleading_jet
     # The jet labels array contains PFCand labels starting from 0 for both leading and subleading jets
     # Something like: [0,1,2,3,4,5,.....,50,0,1,2,......34,999,999,999...] assuming that subjet 1 has 50 PFCands and subjet 2 has 34 PFCands, followed by zero padding to make the shape 100
-    # Now applying the mask as jet_labels<mask_limit[:,None] will allow us to select only the leading NUM_SELECTED_PFCANDS//2 PFCands of each sub-jet, and if the subleading jet
+    # Now applying the mask as evt_subjet_idx<mask_limit[:,None] will allow us to select only the leading NUM_SELECTED_PFCANDS//2 PFCands of each sub-jet, and if the subleading jet
     # has less than NUM_SELECTED_PFCANDS//2 PFCands, then we select the balance PFCands from the leading jet
 
     #mask_limit=np.where(num_PFCands_subleading_jet>NUM_SELECTED_PFCANDS//2,NUM_SELECTED_PFCANDS//2,NUM_SELECTED_PFCANDS-num_PFCands_subleading_jet)
     
-    #pf_mask=jet_labels<mask_limit[...,None]
+    #pf_mask=evt_subjet_idx<mask_limit[...,None]
     signal_jj=signal_jj[mask]
     signal_truth=np.ones_like(signal_jj[:,0])
-        
+    import pdb;pdb.set_trace()
     with h5py.File(outfile, 'w') as signal_hf:
         signal_hf.create_dataset('particleFeatures', data=jet_PFCands)
         signal_hf.create_dataset('eventFeatures', data=signal_jj)
@@ -82,16 +83,23 @@ def process_signal_region(filename):
         signal_hf.create_dataset('truth_label', data=signal_truth)
         signal_hf.create_dataset('truth_label_shape', data=signal_truth.shape)
         signal_hf.create_dataset('num_PFCands_subleading_jet',data=num_PFCands_subleading_jet)
-        signal_hf.create_dataset('PFCand_subjet_labels',data=jet_labels)
-        signal_hf.close()
+        signal_hf.create_dataset('PFCand_subjet_idx',data=evt_subjet_idx)
+        signal_hf.create_dataset('subjet_features',data=evt_subjet_features)
+        signal_hf.create_dataset('subjet_feature_names',data=sf_names)
+
         print("\n\n#### DONE #####\n\n")
 
 if __name__ == '__main__':
 
-    signal='qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_signalregion_parts'#'AtoHZ'#
+    multi=False
     raw_file_dir = '/ceph/bmaier/CASE/delphes/events/'
     file_paths=sorted(glob.glob(raw_file_dir+f'{signal}*/*.h5'))
-    num_cores=min(len(file_paths), os.cpu_count()//2)
-    print(f"Will use {num_cores} cores to process {len(file_paths)} files")
-    pool = Pool(num_cores);sleep(3)
-    pool.map(process_signal_region, file_paths) 
+    
+    if multi:
+        num_cores=min(len(file_paths), 8)
+        print(f"Will use {num_cores} cores to process {len(file_paths)} files")
+        pool = Pool(num_cores);sleep(3)
+        pool.map(process_signal_region, file_paths) 
+    else:
+        for filename in file_paths:
+            process_signal_region(filename)
