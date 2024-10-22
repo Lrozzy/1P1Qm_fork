@@ -26,7 +26,7 @@ parser.add_argument('--resume',default=False,action='store_true',help='Set to tr
 parser.add_argument('--desc',default='Training run',help='Set a description for logging purposes')
 parser.add_argument('--n_threads',default='8',type=str)
 parser.add_argument('--norm_pt',default=False,action='store_true')
-parser.add_argument('--SR',default=False,action='store_true')
+# parser.add_argument('--SR',default=False,action='store_true')
 parser.add_argument('--no_reuploading',action='store_false',default=True)
 parser.add_argument('--save_dir',default='/work/abal/qae_hep/saved_models/',type=str)
 parser.add_argument('--data_dir',default='/storage/9/abal/CASE/delphes/',type=str)
@@ -135,13 +135,13 @@ else:
 
 val_key='QCD_test'
 
-if args.SR:
-    val_key='QCD_SR_test'
-    logger.info(f"Using signal region MC for training")
-    if args.flat:
-        data_key='QCD_SR_train_flat'
-    else:
-        data_key='QCD_SR_train'
+# if args.SR:
+#     val_key='QCD_SR_test'
+#     logger.info(f"Using signal region MC for training")
+#     if args.flat:
+#         data_key='QCD_SR_train_flat'
+#     else:
+#         data_key='QCD_SR_train'
 
 logger.info(f'loading data from {ps.PathSetter(data_path=args.data_dir).get_data_path(data_key)}')
 train_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path(data_key),'*.h5')))
@@ -156,9 +156,9 @@ logger.info(f"Training on {len(train_filelist)} files found at {ps.PathSetter(da
 logger.info(f"Validating on {len(val_filelist)} files found at {ps.PathSetter(data_path=args.data_dir).get_data_path(val_key)}")
 
 train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=True\
-                                        ,max_samples=train_max_n,use_fixed_scaling=args.norm_pt,normalize_pt=args.norm_pt)
+                                        ,max_samples=train_max_n,normalize_pt=args.norm_pt)
 val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=False,\
-                                      max_samples=valid_max_n,use_fixed_scaling=args.norm_pt,normalize_pt=args.norm_pt) 
+                                      max_samples=valid_max_n,normalize_pt=args.norm_pt) 
 
 ### Initialize the optimizer ###
 optimizer=qc.qml.AdamOptimizer(stepsize=args.lr)

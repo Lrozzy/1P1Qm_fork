@@ -36,7 +36,7 @@ class CASEDelphesJetDataset(IterableDataset):
     """
     def __init__(self, filelist:List[str]=None, batch_size:int=32, max_samples:int=5e4, data_key='jetConstituentsList',\
                  feature_key='eventFeatures',input_shape:tuple[int]=(10, 3),epsilon:float=1.0e-4,train:bool=True,yield_energies=False,\
-                    use_fixed_scaling=False,normalize_pt=False):
+                    normalize_pt=False):
         super().__init__()
         self.filelist = sorted(filelist)
         self.batch_size = batch_size
@@ -47,7 +47,7 @@ class CASEDelphesJetDataset(IterableDataset):
         self.j1pt_index=ut.getIndex('event','j1Pt')
         self.j2pt_index=ut.getIndex('event','j2Pt') # Bug fix
         self.mjj_index=ut.getIndex('event','mJJ')
-        self.use_fixed_scaling=use_fixed_scaling
+        
         self.max_samples = 2*max_samples
         self.epsilon=epsilon
         self.data_key=data_key
@@ -115,7 +115,7 @@ class CASEDelphesJetDataset(IterableDataset):
         else:
             jet_etaphipt[:,0,:,self.pt_index]=self.fixed_rescale(jet_etaphipt[:,0,:,self.pt_index], epsilon=self.epsilon,type='pt')
             jet_etaphipt[:,1,:,self.pt_index]=self.fixed_rescale(jet_etaphipt[:,1,:,self.pt_index], epsilon=self.epsilon,type='pt')
-        #if self.use_fixed_scaling:
+        
         jet_etaphipt[:,0,:,self.eta_index]=self.fixed_rescale(jet_etaphipt[:,0,:,self.eta_index], epsilon=self.epsilon,type='eta')
         jet_etaphipt[:,0,:,self.phi_index]=self.fixed_rescale(jet_etaphipt[:,0,:,self.phi_index], epsilon=self.epsilon,type='phi')
         jet_etaphipt[:,1,:,self.eta_index]=self.fixed_rescale(jet_etaphipt[:,1,:,self.eta_index], epsilon=self.epsilon,type='eta')
@@ -219,7 +219,7 @@ class CASEDelphesJetDataset(IterableDataset):
                     yield np.array(batch_data,requires_grad=False), np.array(batch_labels,requires_grad=False)
 
 def CASEDelphesDataLoader(filelist:List[str]=None,batch_size:int=128, input_shape:tuple[int]=(100, 3),\
-    train:bool=True,max_samples:int=5e4,use_fixed_scaling:bool=False,normalize_pt:bool=False) -> DataLoader:
+    train:bool=True,max_samples:int=5e4,normalize_pt:bool=False) -> DataLoader:
     '''
     Wrapper function to create a DataLoader for the CASEDelphesJetDataset.
 
@@ -233,7 +233,7 @@ def CASEDelphesDataLoader(filelist:List[str]=None,batch_size:int=128, input_shap
     '''
     print(f"Will read only first {input_shape[0]} particles per jet")
     dataset = CASEDelphesJetDataset(filelist=filelist, batch_size=batch_size, input_shape=input_shape,train=train,\
-                                    max_samples=max_samples,use_fixed_scaling=use_fixed_scaling,normalize_pt=normalize_pt)
+                                    max_samples=max_samples,normalize_pt=normalize_pt)
     
     return DataLoader(dataset, batch_size=None)  # None for batch_size since batching is managed by the dataset
 
