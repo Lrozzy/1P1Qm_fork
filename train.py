@@ -26,6 +26,7 @@ parser.add_argument('--resume',default=False,action='store_true',help='Set to tr
 parser.add_argument('--desc',default='Training run',help='Set a description for logging purposes')
 parser.add_argument('--n_threads',default='8',type=str)
 parser.add_argument('--norm_pt',default=False,action='store_true')
+parser.add_argument('--SR',default=False,action='store_true')
 parser.add_argument('--no_reuploading',action='store_false',default=True)
 parser.add_argument('--save_dir',default='/work/abal/qae_hep/saved_models/',type=str)
 parser.add_argument('--data_dir',default='/storage/9/abal/CASE/delphes/',type=str)
@@ -70,7 +71,7 @@ if args.resume:
 
 else:
     ### Initialize the quantum autoencoder ##
-    logger.add(os.path.join(args.save_dir,'logs.log'),rotation='10 MB',backtrace=True,diagnose=True,level='DEBUG', mode="w")
+    logger.add(os.path.join(save_dir,'logs.log'),rotation='10 MB',backtrace=True,diagnose=True,level='DEBUG', mode="w")
     logger.info("########################################### \n\n")
     if args.separate_ancilla:
         logger.info(f"This circuit contains {args.wires+2*args.trash_qubits} qubits")
@@ -80,9 +81,10 @@ else:
     print("Will save models to: ",save_dir)
     tmpfile=os.path.join(save_dir,'FROZEN_ARCHITECTURE.py')
     subprocess.call('cp quantum/architectures.py '+tmpfile,shell=True)
+    tmpfile=os.path.join(save_dir,'FROZEN_DATAREADER.py')
+    subprocess.call('cp case_reader.py '+tmpfile,shell=True)
 
-
-logger.info(f"Feature are scaled assuming the following sample maxima: {ut.feature_limits}")
+logger.info(f"Feature are scaled to the following limits: {ut.feature_limits}")
 
 if args.norm_pt:
     logger.info(f"pT will not be scaled to the above limit. Will be normalized using 1/jet_pt")
@@ -90,6 +92,7 @@ else:
     logger.info(f"pT will also be scaled assuming above maxima")
 if args.flat:
     logger.info("Using flat mjj distribution for training")
+
 
 args.non_trash=args.wires-args.trash_qubits
 assert args.non_trash>0,'Need strictly positive dimensional compressed representation of input state!'
@@ -124,13 +127,34 @@ with open(os.path.join(save_dir,'args.txt'),'w+') as f:
 
 
 ### Load the data and create a dataloader ###
+
 if args.flat:
     data_key='QCD_flat'
 else:
     data_key='QCD_train'
+
+val_key='QCD_test'
+
+if args.SR:
+    val_key='QCD_SR_test'
+    logger.info(f"Using signal region MC for training")
+    if args.flat:
+        data_key='QCD_SR_train_flat'
+    else:
+        data_key='QCD_SR_train'
+
 logger.info(f'loading data from {ps.PathSetter(data_path=args.data_dir).get_data_path(data_key)}')
 train_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path(data_key),'*.h5')))
-val_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path('QCD_test'),'*.h5')))
+val_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path(val_key),'*.h5')))
+
+
+
+if (len(train_filelist)==0) or (len(val_filelist)==0):
+    raise FileNotFoundError(f"Could not find files in {ps.PathSetter(data_path=args.data_dir).get_data_path(data_key)} or {ps.PathSetter(data_path=args.data_dir).get_data_path(val_key)}")
+
+logger.info(f"Training on {len(train_filelist)} files found at {ps.PathSetter(data_path=args.data_dir).get_data_path(data_key)}")
+logger.info(f"Validating on {len(val_filelist)} files found at {ps.PathSetter(data_path=args.data_dir).get_data_path(val_key)}")
+
 train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=True\
                                         ,max_samples=train_max_n,use_fixed_scaling=args.norm_pt,normalize_pt=args.norm_pt)
 val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=False,\
@@ -143,6 +167,7 @@ optimizer=qc.qml.AdamOptimizer(stepsize=args.lr)
 trainer=qc.QuantumTrainer(qAE,lr=args.lr,backend_name=args.backend,init_weights=init_weights,device_name=device_name,\
                           train_max_n=train_max_n,valid_max_n=valid_max_n,epochs=args.epochs,batch_size=args.batch_size,\
                             logger=logger,save=args.save,patience=4,optimizer=optimizer,loss_fn=cost_fn)
+
 trainer.print_params('Initialized parameters!')
 trainer.set_directories(save_dir)
 
