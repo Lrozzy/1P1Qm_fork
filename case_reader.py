@@ -109,6 +109,7 @@ class CASEDelphesJetDataset(IterableDataset):
                 else:
                     truth_label = np.ones(jet_etaphipt.shape[0])
         if self.normalize_pt:
+            print("Normalizing PFCand pT by jet pT")
             jet_etaphipt[:,0,:,self.pt_index]=jet_etaphipt[:,0,:,self.pt_index]/j1pt[:,np.newaxis]
             jet_etaphipt[:,1,:,self.pt_index]=jet_etaphipt[:,1,:,self.pt_index]/j2pt[:,np.newaxis]
         else:
@@ -120,7 +121,7 @@ class CASEDelphesJetDataset(IterableDataset):
         jet_etaphipt[:,1,:,self.eta_index]=self.fixed_rescale(jet_etaphipt[:,1,:,self.eta_index], epsilon=self.epsilon,type='eta')
         jet_etaphipt[:,1,:,self.phi_index]=self.fixed_rescale(jet_etaphipt[:,1,:,self.phi_index], epsilon=self.epsilon,type='phi')
             
-        # If you only train, then no need to batch, just return the entire array
+        # If you only wish to test, then no need to batch, just return the entire array
         if inference:
             return jet_etaphipt,np.stack([mjj,j1pt,j2pt],axis=-1),truth_label
         
@@ -186,7 +187,7 @@ class CASEDelphesJetDataset(IterableDataset):
             # Shuffle the data from this file only if training on a per-jet basis, otherwise it becomes necessary to preserve the order of jets
             
             indices = np.arange(data.shape[0])
-            np.random.shuffle(indices)
+            np.random.shuffle(indices); print("Loaded data was shuffled")
             data = data[indices]
             labels = labels[indices]
             
@@ -312,7 +313,7 @@ def rescale_and_reshape(data: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]
     
     stacked_data = nnp.concatenate(data, axis=0)
     stacked_data[:, :, pt_index] = rescale(stacked_data[:, :, pt_index], min=0., max=1.0, epsilon=1.0e-4)
-    stacked_data[:, :, eta_index] = rescale(stacked_data[:, :, eta_index], min=-np.pi, max=nnp.pi, epsilon=0)
+    stacked_data[:, :, eta_index] = rescale(stacked_data[:, :, eta_index], min=-nnp.pi, max=nnp.pi, epsilon=0)
     stacked_data[:, :, phi_index] = rescale(stacked_data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=0)
     return nnp.split(stacked_data, data_len)[:-1]
 
