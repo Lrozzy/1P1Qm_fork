@@ -45,14 +45,14 @@ def process_sideband(filename):
         
         jet_PFCands,jet_labels, mask, num_PFCands_subleading_jet=pf.uncluster(side_pf_pxpypzE,min_pt=jPt)
         
-        # For jets with more than 5 PFCands in the subleading jet, we only consider the 5 leading PFCands
+        # For jets with more than NUM_SELECTED_PFCANDS//2 PFCands in the subleading jet, we only consider the NUM_SELECTED_PFCANDS//2 leading PFCands
         # If less, then set mask to NUM_SELECTED_PFCANDS - num_PFCands_subleading_jet
         # The jet labels array contains PFCand labels starting from 0 for both leading and subleading jets
         # Something like: [0,1,2,3,4,5,.....,50,0,1,2,......34,999,999,999...] assuming that subjet 1 has 50 PFCands and subjet 2 has 34 PFCands, followed by zero padding to make the shape 100
-        # Now applying the mask as jet_labels<mask_limit[:,None] will allow us to select only the leading 5 PFCands of each sub-jet, and if the subleading jet
-        # has less than 5 PFCands, then we select the balance PFCands from the leading jet
+        # Now applying the mask as jet_labels<mask_limit[:,None] will allow us to select only the leading NUM_SELECTED_PFCANDS//2 PFCands of each sub-jet, and if the subleading jet
+        # has less than NUM_SELECTED_PFCANDS//2 PFCands, then we select the balance PFCands from the leading jet
 
-        #mask_limit=np.where(num_PFCands_subleading_jet>5,5,NUM_SELECTED_PFCANDS-num_PFCands_subleading_jet)
+        #mask_limit=np.where(num_PFCands_subleading_jet>NUM_SELECTED_PFCANDS//2,NUM_SELECTED_PFCANDS//2,NUM_SELECTED_PFCANDS-num_PFCands_subleading_jet)
         
         #pf_mask=jet_labels<mask_limit[...,None]
         side_jj=side_jj[mask]
