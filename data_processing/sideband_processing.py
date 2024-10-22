@@ -58,8 +58,7 @@ def process_sideband(filename):
         side_jj=side_jj[mask]
         side_truth=np.zeros_like(side_jj[:,0])
         
-        #import pdb;pdb.set_trace()
-        side_jj=side_jj[mask]
+        #
         side_truth=np.zeros_like(side_jj[:,0])
         side_hf = h5py.File(outfile, 'w')
         side_hf.create_dataset('particleFeatures', data=jet_PFCands)
