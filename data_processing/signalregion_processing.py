@@ -1,6 +1,6 @@
 import numpy as np
 from re import sub
-import os,glob,pdb,h5py,pathlib,tqdm,re
+import os,glob,h5py,pathlib,tqdm,re
 import matplotlib;matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import processing_functions as pf
@@ -74,7 +74,7 @@ def process_signal_region(filename):
     #pf_mask=evt_subjet_idx<mask_limit[...,None]
     signal_jj=signal_jj[mask]
     signal_truth=np.ones_like(signal_jj[:,0])
-    import pdb;pdb.set_trace()
+    
     with h5py.File(outfile, 'w') as signal_hf:
         signal_hf.create_dataset('particleFeatures', data=jet_PFCands)
         signal_hf.create_dataset('eventFeatures', data=signal_jj)
@@ -86,12 +86,12 @@ def process_signal_region(filename):
         signal_hf.create_dataset('PFCand_subjet_idx',data=evt_subjet_idx)
         signal_hf.create_dataset('subjet_features',data=evt_subjet_features)
         signal_hf.create_dataset('subjet_feature_names',data=sf_names)
-
+        signal_hf.create_dataset('subjet_labels',data=evt_subjet_labels)
         print("\n\n#### DONE #####\n\n")
 
 if __name__ == '__main__':
 
-    multi=False
+    multi=True
     raw_file_dir = '/ceph/bmaier/CASE/delphes/events/'
     file_paths=sorted(glob.glob(raw_file_dir+f'{signal}*/*.h5'))
     

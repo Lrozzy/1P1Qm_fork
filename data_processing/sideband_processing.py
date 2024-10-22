@@ -60,7 +60,7 @@ def process_sideband(filename):
     #pf_mask=evt_subjet_idx<mask_limit[...,None]
     side_jj=side_jj[mask]
     side_truth=np.zeros_like(side_jj[:,0])
-    #import pdb;pdb.set_trace()
+    
 
     with h5py.File(outfile, 'w') as side_hf:
         side_hf.create_dataset('particleFeatures', data=jet_PFCands)
@@ -73,14 +73,14 @@ def process_sideband(filename):
         side_hf.create_dataset('PFCand_subjet_idx',data=evt_subjet_idx)
         side_hf.create_dataset('subjet_features',data=evt_subjet_features)
         side_hf.create_dataset('subjet_feature_names',data=sf_names)
-
+        side_hf.create_dataset('subjet_labels',data=evt_subjet_labels)
     print("\n\n#### DONE #####\n\n")
 
 if __name__ == '__main__':
     multi=True
     file_paths=glob.glob('/ceph/bmaier/CASE/delphes/events/qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/*.h5')
     if multi:
-        num_cores=min(len(file_paths), 8)
+        num_cores=min(len(file_paths), 12)
         print(f"Will use {num_cores} cores to process {len(file_paths)} files")
         pool = Pool(num_cores);sleep(3)
         pool.map(process_sideband, file_paths) 
