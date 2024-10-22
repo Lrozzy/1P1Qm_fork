@@ -238,6 +238,20 @@ def CASEDelphesDataLoader(filelist:List[str]=None,batch_size:int=128, input_shap
     return DataLoader(dataset, batch_size=None)  # None for batch_size since batching is managed by the dataset
 
 
+
+
+
+
+
+
+
+
+
+
+########## REDUNDANT STUFF ############
+
+
+
 def fixed_rescale(data: np.ndarray, min: float = 0.0, max: float = 1.0, epsilon: float = 1.0e-4, type='pt') -> np.ndarray:
     """
     Rescales the data to a specified range. 
@@ -280,20 +294,6 @@ def fixed_rescale_and_reshape(data: np.ndarray)-> np.ndarray:
     data[:, :, eta_index] = fixed_rescale(data[:, :, eta_index], min=0., max=nnp.pi, epsilon=0,type='eta')
     data[:, :, phi_index] = fixed_rescale(data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=0,type='phi')
     return data
-
-
-
-
-
-
-
-
-
-
-
-########## REDUNDANT STUFF ############
-
-
 
 def rescale_and_reshape(data: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
     '''
