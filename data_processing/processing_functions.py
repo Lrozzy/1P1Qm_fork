@@ -23,6 +23,7 @@ def uncluster(jet_data,min_pt=100,test=False):
     for i in range(nEvts):
         jet_PFCands=[]
         jet_idx=[]
+        jet_labels=[]
         nPFCands_softer=[]
         jet_subfeatures=[]
         if (i+1)%1000==0:
@@ -71,11 +72,11 @@ def uncluster(jet_data,min_pt=100,test=False):
                 jet_constituents=np.concatenate([jet_constituents,np.zeros((100-jet_constituents.shape[0],3))])
                 subjet_idx=np.concatenate([subjet_idx,999*np.ones(100-subjet_idx.shape[0])])
                 subjet_labels=np.concatenate([subjet_labels,-1*np.ones(100-subjet_labels.shape[0])])
-            jet_PFCands.append(jet_constituents);jet_idx.append(subjet_idx);jet_subfeatures.append(subjet_features)
+            jet_PFCands.append(jet_constituents);jet_idx.append(subjet_idx);jet_subfeatures.append(subjet_features);jet_labels.append(subjet_labels)
         evt_subjet_features.append(np.stack(jet_subfeatures,axis=0))
         evt_PFCands.append(np.stack(jet_PFCands,axis=0))
         evt_subjet_idx.append(np.stack(jet_idx,axis=0))
-        evt_subjet_labels.append(np.stack(subjet_labels,axis=0))
+        evt_subjet_labels.append(np.stack(jet_labels,axis=0))
         num_PFCands.append(np.array(nPFCands_softer))
     
     return np.array(evt_PFCands),np.array(evt_subjet_idx),np.array(mask).astype(bool),np.array(num_PFCands),np.array(evt_subjet_features),np.array(evt_subjet_labels)
