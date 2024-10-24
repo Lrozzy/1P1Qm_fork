@@ -26,7 +26,7 @@ parser.add_argument('--resume',default=False,action='store_true',help='Set to tr
 parser.add_argument('--desc',default='Training run',help='Set a description for logging purposes')
 parser.add_argument('--n_threads',default='8',type=str)
 parser.add_argument('--norm_pt',default=False,action='store_true')
-# parser.add_argument('--SR',default=False,action='store_true')
+parser.add_argument('--substructure',default=False,action='store_true')
 parser.add_argument('--no_reuploading',action='store_false',default=True)
 parser.add_argument('--save_dir',default='/work/abal/qae_hep/saved_models/',type=str)
 parser.add_argument('--data_dir',default='/storage/9/abal/CASE/delphes/',type=str)
@@ -86,6 +86,15 @@ else:
 
 logger.info(f"Feature are scaled to the following limits: {ut.feature_limits}")
 
+if args.no_reuploading: 
+# The argument name is confusing. If no_reuploading is set to True (which is the default), then reuploading is (counter-intuitively) set to True
+    NUM_WEIGHTS=len(qc.auto_wires)*6
+else:
+# Otherwise, we need 3*N_QUBITS parameters for the circuit
+    NUM_WEIGHTS=len(qc.auto_wires)*3    
+# This confusing name exists within the code so that the user can switch off reuploading by passing a flag --no_reuploading
+# TODO: Change the name of the argument to something more intuitive. 
+
 if args.norm_pt:
     logger.info(f"pT will not be scaled to the above limit. Will be normalized using 1/jet_pt")
 else:
@@ -99,8 +108,9 @@ assert args.non_trash>0,'Need strictly positive dimensional compressed represent
 qAE=qc.QuantumAutoencoder(wires=args.wires, shots=args.shots, trash_qubits=args.trash_qubits, dev_name=device_name,separate_ancilla=args.separate_ancilla)
 qAE.set_circuit(reuploading=args.no_reuploading)
 
+
 if not args.resume:
-    init_weights=qc.np.random.uniform(0,qc.np.pi,size=(len(qc.auto_wires)*6,), requires_grad=True)
+    init_weights=qc.np.random.uniform(0,qc.np.pi,size=(NUM_WEIGHTS,), requires_grad=True)
 
 train_max_n=args.train_n
 valid_max_n=args.valid_n
@@ -156,9 +166,9 @@ logger.info(f"Training on {len(train_filelist)} files found at {ps.PathSetter(da
 logger.info(f"Validating on {len(val_filelist)} files found at {ps.PathSetter(data_path=args.data_dir).get_data_path(val_key)}")
 
 train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=True\
-                                        ,max_samples=train_max_n,normalize_pt=args.norm_pt)
+                                        ,max_samples=train_max_n,normalize_pt=args.norm_pt,use_subjet_PFCands=args.substructure)
 val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=False,\
-                                      max_samples=valid_max_n,normalize_pt=args.norm_pt) 
+                                      max_samples=valid_max_n,normalize_pt=args.norm_pt,use_subjet_PFCands=args.substructure) 
 
 ### Initialize the optimizer ###
 optimizer=qc.qml.AdamOptimizer(stepsize=args.lr)
