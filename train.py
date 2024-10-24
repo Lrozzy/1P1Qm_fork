@@ -92,10 +92,7 @@ else:
 
 logger.info(f"Feature are scaled to the following limits: {ut.feature_limits}")
 
-if use_reuploading: 
-    NUM_WEIGHTS=len(qc.auto_wires)*6
-else:
-    NUM_WEIGHTS=len(qc.auto_wires)*3    
+  
 
 if args.norm_pt:
     logger.info(f"pT will not be scaled to the above limit. Will be normalized using 1/jet_pt")
@@ -110,7 +107,11 @@ assert args.non_trash>0,'Need strictly positive dimensional compressed represent
 qAE=qc.QuantumAutoencoder(wires=args.wires, shots=args.shots, trash_qubits=args.trash_qubits, dev_name=device_name,separate_ancilla=args.separate_ancilla)
 qAE.set_circuit(reuploading=use_reuploading)
 
-
+if use_reuploading: 
+    NUM_WEIGHTS=len(qc.auto_wires)*6
+else:
+    NUM_WEIGHTS=len(qc.auto_wires)*3  
+    
 if not args.resume:
     init_weights=qc.np.random.uniform(0,qc.np.pi,size=(NUM_WEIGHTS,), requires_grad=True)
 
