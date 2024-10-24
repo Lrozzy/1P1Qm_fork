@@ -36,7 +36,7 @@ class CASEDelphesJetDataset(IterableDataset):
     """
     def __init__(self, filelist:List[str]=None, batch_size:int=32, max_samples:int=5e4, data_key='jetConstituentsList',\
                  feature_key='eventFeatures',input_shape:tuple[int]=(10, 3),epsilon:float=1.0e-4,train:bool=True,yield_energies=False,\
-                    normalize_pt=False):
+                    normalize_pt=False,use_subjet_PFCands=False):
         super().__init__()
         self.filelist = sorted(filelist)
         self.batch_size = batch_size
@@ -47,7 +47,7 @@ class CASEDelphesJetDataset(IterableDataset):
         self.j1pt_index=ut.getIndex('event','j1Pt')
         self.j2pt_index=ut.getIndex('event','j2Pt') # Bug fix
         self.mjj_index=ut.getIndex('event','mJJ')
-        
+        self.use_subjet_PFCands=use_subjet_PFCands
         self.max_samples = 2*max_samples
         self.epsilon=epsilon
         self.data_key=data_key
@@ -55,7 +55,8 @@ class CASEDelphesJetDataset(IterableDataset):
         self.train=train
         self.batch_counter=0
         self.normalize_pt=normalize_pt
-    
+        self.n_qubits=input_shape[0]
+
     def fixed_rescale(self,data: np.ndarray, epsilon: float = 1.0e-4, type='pt') -> np.ndarray:
         """
         Rescales the data to a specified range. Instead of using the min/max values of the data array,
@@ -95,12 +96,23 @@ class CASEDelphesJetDataset(IterableDataset):
         
         with h5py.File(file_path, 'r') as file:
             # Read data of shape (N,2,100,3) where N is the number of events, 2 is the number of jets, 100 is the number of particles and 3 is the (eta,phi,pt) of each particle
-            jet_etaphipt = np.array(file[self.data_key][:,:, :self.input_shape[0], :]) # because input_shape[0] is the number of particles
-            #jet1_energy=np.array(file[self.feature_key][:,self.j1E_index])
-            #jet2_energy=np.array(file[self.feature_key][:,self.j2E_index])
             mjj=np.array(file[self.feature_key][:,self.mjj_index])
             j1pt=np.array(file[self.feature_key][:,self.j1pt_index])
             j2pt=np.array(file[self.feature_key][:,self.j2pt_index])
+
+            if self.use_subjet_PFCands:
+                print(f"Reading {self.n_qubits//2} PFCands from each subjet for a total of {self.n_qubits} PFCands per jet")
+                jet_etaphipt = np.array(file[self.data_key][()]) # because n_qubits is the number of particles
+                num_PFCands_subleading_jet=file['num_PFCands_subleading_jet'][()]
+                evt_subjet_idx=file['PFCand_subjet_idx'][()] # N x 2 x 100
+                mask_limit=np.where(num_PFCands_subleading_jet>self.n_qubits//2,self.n_qubits//2,self.n_qubits-num_PFCands_subleading_jet) # N x 2
+                pf_mask=evt_subjet_idx<mask_limit[...,None] # N x 2 x 100
+                jet_etaphipt=jet_etaphipt[pf_mask].reshape(-1,2,self.n_qubits,3) # N x 2 x n_qubits x 3
+            else:
+                jet_etaphipt = np.array(file[self.data_key][:,:, :self.n_qubits, :]) # because n_qubits is the number of particles
+            #jet1_energy=np.array(file[self.feature_key][:,self.j1E_index])
+            #jet2_energy=np.array(file[self.feature_key][:,self.j2E_index])
+            
             try:
                 truth_label = np.array(file['truth_label'][()])
             except:
@@ -160,6 +172,7 @@ class CASEDelphesJetDataset(IterableDataset):
         jetFeatures_array=[]
         while len(jetFeatures_array)<self.max_samples:
             for i,file_path in enumerate(self.filelist):
+                #import pdb;pdb.set_trace()
                 jet_etaphipt,jet_features,truth_label= self.load_and_preprocess_file(file_path,inference=True)
                 if i==0:
                     jetFeatures_array=jet_features
@@ -219,10 +232,9 @@ class CASEDelphesJetDataset(IterableDataset):
                     yield np.array(batch_data,requires_grad=False), np.array(batch_labels,requires_grad=False)
 
 def CASEDelphesDataLoader(filelist:List[str]=None,batch_size:int=128, input_shape:tuple[int]=(100, 3),\
-    train:bool=True,max_samples:int=5e4,normalize_pt:bool=False) -> DataLoader:
+    train:bool=True,max_samples:int=5e4,normalize_pt:bool=False,use_subjet_PFCands:bool=False) -> DataLoader:
     '''
     Wrapper function to create a DataLoader for the CASEDelphesJetDataset.
-
     Args:
         filelist (List[str]): List of file paths to the .h5 files containing the data.
         batch_size (int): Number of samples in each batch.
@@ -231,9 +243,12 @@ def CASEDelphesDataLoader(filelist:List[str]=None,batch_size:int=128, input_shap
     Returns:
         DataLoader: Torch DataLoader object that yields batches of data.
     '''
-    print(f"Will read only first {input_shape[0]} particles per jet")
+    print(f"Will read only {input_shape[0]} particles per jet")
+    if use_subjet_PFCands:
+        print("Equally divided between 2 subjets per jet")
+    
     dataset = CASEDelphesJetDataset(filelist=filelist, batch_size=batch_size, input_shape=input_shape,train=train,\
-                                    max_samples=max_samples,normalize_pt=normalize_pt)
+                                    max_samples=max_samples,normalize_pt=normalize_pt,use_subjet_PFCands=use_subjet_PFCands)
     
     return DataLoader(dataset, batch_size=None)  # None for batch_size since batching is managed by the dataset
 
