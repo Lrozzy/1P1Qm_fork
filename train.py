@@ -51,6 +51,12 @@ save_dir=os.path.join(args.save_dir,args.seed)
 plot_dir=os.path.join(save_dir,'plots')
 pathlib.Path(plot_dir).mkdir(parents=True,exist_ok=True)
 
+
+# The argument name is confusing. If no_reuploading is set to True (which is the default), then reuploading is (counter-intuitively) set to True
+# Otherwise, we need 3*N_QUBITS parameters for the circuit
+# This confusing name exists within the code so that the user can switch off reuploading by passing a flag --no_reuploading
+use_reuploading=args.no_reuploading # default is True
+
 if args.resume:
     test_args=ut.Unpickle(os.path.join(save_dir,'args.pickle'))
     import importlib;qc=importlib.import_module('saved_models.'+args.seed+'.FROZEN_ARCHITECTURE')
@@ -86,14 +92,10 @@ else:
 
 logger.info(f"Feature are scaled to the following limits: {ut.feature_limits}")
 
-if args.no_reuploading: 
-# The argument name is confusing. If no_reuploading is set to True (which is the default), then reuploading is (counter-intuitively) set to True
+if use_reuploading: 
     NUM_WEIGHTS=len(qc.auto_wires)*6
 else:
-# Otherwise, we need 3*N_QUBITS parameters for the circuit
     NUM_WEIGHTS=len(qc.auto_wires)*3    
-# This confusing name exists within the code so that the user can switch off reuploading by passing a flag --no_reuploading
-# TODO: Change the name of the argument to something more intuitive. 
 
 if args.norm_pt:
     logger.info(f"pT will not be scaled to the above limit. Will be normalized using 1/jet_pt")
@@ -106,7 +108,7 @@ if args.flat:
 args.non_trash=args.wires-args.trash_qubits
 assert args.non_trash>0,'Need strictly positive dimensional compressed representation of input state!'
 qAE=qc.QuantumAutoencoder(wires=args.wires, shots=args.shots, trash_qubits=args.trash_qubits, dev_name=device_name,separate_ancilla=args.separate_ancilla)
-qAE.set_circuit(reuploading=args.no_reuploading)
+qAE.set_circuit(reuploading=use_reuploading)
 
 
 if not args.resume:
