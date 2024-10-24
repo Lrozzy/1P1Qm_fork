@@ -104,8 +104,8 @@ if args.load:
     sig_labels=nnp.ones(sig_fids_j1.shape[0])
 else:
     paths=ps.PathSetter(data_path='/storage/9/abal/CASE/delphes')
-    qcd_files=sorted(glob.glob(paths.get_data_path('QCD_SR')+'/*.h5'))
-    import pdb;pdb.set_trace()
+    qcd_files=sorted(glob.glob(paths.get_data_path('QCD_SR_test')+'/*.h5'))
+    #import pdb;pdb.set_trace()
     sig_files=sorted(glob.glob(paths.get_data_path(args.signal)+'/*.h5'))
     qcd_j1_etaphipt,qcd_j2_etaphipt,qcd_mjj,qcd_labels=cr.CASEDelphesJetDataset(filelist=qcd_files,input_shape=(len(qc.auto_wires),3),\
                                                                                 max_samples=read_n).load_for_inference()
@@ -212,7 +212,7 @@ for cut in sig_cuts:
         plot_eff.append(sig_eff)
         significance.append(sig_eff/nnp.sqrt(qcd_eff))
 sig_cuts=nnp.percentile(sig_costs,effs)
-
+import pdb;pdb.set_trace()
 plt.plot(plot_eff,significance)
 plt.minorticks_on()
 plt.grid(True,which='major',linestyle='--')
@@ -228,7 +228,7 @@ inv_effs=100-effs
 
 # Plot QCD shapes in various quantiles
 cuts=nnp.percentile(qcd_costs,effs)
-import pdb;pdb.set_trace()
+#import pdb;pdb.set_trace()
 plt.hist(mjj[labels==0],bins=100,range=[1000,5000],label='QCD inclusive',histtype='step',linewidth=1.,density=True)
 for i,(lower_cut,upper_cut) in enumerate(zip(cuts[:-1],cuts[1:])):
     
