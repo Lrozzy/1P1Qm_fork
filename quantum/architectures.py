@@ -2,7 +2,7 @@
 from typing import Optional, Callable, Union, List, Dict, Tuple, Any
 import pennylane as qml
 from helpers.utils import getIndex
-from itertools import combinations
+from itertools import combinations, product
 import time
 from tqdm import tqdm
 import pennylane.numpy as np
@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader
 dev = None
 all_wires=None
 two_comb_wires = None
+subjet_comb_wires = None
 auto_wires = None
 ref_wires = None
 ancillary_wires = None
@@ -31,7 +32,7 @@ def initialize(wires:int=4, trash_qubits:int=0,separate_ancilla=False):
         separate_ancilla (bool): Whether to separate ancillary qubits from main qubits.
     """
 
-    global all_wires, auto_wires, two_comb_wires, ref_wires, ancillary_wires, index, n_trash_qubits,SEPARATE_ANCILLA
+    global all_wires, auto_wires, two_comb_wires, subjet_comb_wires, ref_wires, ancillary_wires, index, n_trash_qubits,SEPARATE_ANCILLA
     if separate_ancilla:
         SEPARATE_ANCILLA=True
         N_QUBITS=wires+trash_qubits*2
@@ -42,6 +43,7 @@ def initialize(wires:int=4, trash_qubits:int=0,separate_ancilla=False):
     all_wires=[_ for _ in range(N_QUBITS)]
     n_trash_qubits = trash_qubits
     two_comb_wires=list(combinations([i for i in range(wires)],2))
+    subjet_comb_wires=list(product(all_wires[wires//2:wires],all_wires[:wires//2]))
     ancillary_wires=all_wires[-N_ANCILLA:] # The last N qubits (earlier, we had N=1) are the ancilla
     auto_wires=all_wires[:wires]
     ref_wires=all_wires[wires:wires+trash_qubits] # Do NOT initialize ref_wires before n_trash_qubits is set    
@@ -71,6 +73,7 @@ def print_training_params()->None:
     print()
     print('auto_wires:',auto_wires)
     print('two_comb_wires:',two_comb_wires)
+    print('subjet_comb_wires:',subjet_comb_wires)
     print('ref_wires:',ref_wires)
     print('ancillary_wires:',ancillary_wires)
     print('index:',index)
@@ -146,7 +149,9 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         qml.RY(radius*zenith, wires=w)   
         qml.RZ(radius*azimuth, wires=w)  
     # QAE Circuit
-
+    for item in subjet_comb_wires:
+        qml.CNOT(wires=item)
+    
     for phi,theta,omega,i in zip(weights[:N],weights[N:2*N],weights[2*N:3*N],auto_wires):
         qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
     
@@ -175,7 +180,15 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         # radius = inputs[:,w, index['pt']] # corresponding to pt
         # qml.CRY(radius*zenith,wires=item)
         # qml.CRZ(radius*azimuth,wires=item)
-    
+
+    for item in subjet_comb_wires:
+        #qml.CNOT(wires=item)
+        w=item[0] # Upload the subjet features a third time 
+        zenith = inputs[:,w, index['eta']] # corresponding to eta
+        azimuth = inputs[:,w, index['phi']] # corresponding to phi
+        radius = inputs[:,w, index['pt']] # corresponding to pt
+        qml.CRY(radius*zenith,wires=item)
+        qml.CRZ(radius*azimuth,wires=item)
 
     # for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
     #     qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
