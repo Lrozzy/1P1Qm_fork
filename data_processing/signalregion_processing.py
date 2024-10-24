@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import processing_functions as pf
 from multiprocessing import Pool
 from time import sleep
-signal='AtoHZ'#'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_signalregion_parts'#
+signal='RSGraviton'#'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_signalregion_parts'#'AtoHZ'#
 def process_signal_region(filename):
     dt = h5py.special_dtype(vlen=str)
     ipath='/web/abal/public_html/debug/'
@@ -36,7 +36,7 @@ def process_signal_region(filename):
         sig_mass=re.findall(r'(?<=PU40_)(.*)(?=TeV)',localfile)[0].replace('.','p')
         #sig_folder=os.path.join(outfolder,'grav_'+sig_mass+'_'+res_type) # format: grav_1p5_na
         sig_folder=os.path.join(outfolder,signal+'_'+sig_mass) # format: grav_1p5_na
-        if 'grav' in signal:
+        if 'Graviton' in signal:
             sig_folder=os.path.join(outfolder,'grav_'+sig_mass+'_'+res_type)
     else:
         sig_folder=os.path.join(outfolder,signal)
@@ -76,7 +76,7 @@ def process_signal_region(filename):
     signal_truth=np.ones_like(signal_jj[:,0])
     
     with h5py.File(outfile, 'w') as signal_hf:
-        signal_hf.create_dataset('particleFeatures', data=jet_PFCands)
+        signal_hf.create_dataset('jetConstituentsList', data=jet_PFCands)
         signal_hf.create_dataset('eventFeatures', data=signal_jj)
         signal_hf.create_dataset('particleFeatureNames', data=pf_names)
         signal_hf.create_dataset('eventFeatureNames', data=ef_names)
@@ -94,9 +94,9 @@ if __name__ == '__main__':
     multi=True
     raw_file_dir = '/ceph/bmaier/CASE/delphes/events/'
     file_paths=sorted(glob.glob(raw_file_dir+f'{signal}*/*.h5'))
-    
+    print(file_paths)
     if multi:
-        num_cores=min(len(file_paths), 8)
+        num_cores=min(len(file_paths), 10)
         print(f"Will use {num_cores} cores to process {len(file_paths)} files")
         pool = Pool(num_cores);sleep(3)
         pool.map(process_signal_region, file_paths) 

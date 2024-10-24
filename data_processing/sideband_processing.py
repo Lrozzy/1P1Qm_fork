@@ -63,7 +63,7 @@ def process_sideband(filename):
     
 
     with h5py.File(outfile, 'w') as side_hf:
-        side_hf.create_dataset('particleFeatures', data=jet_PFCands)
+        side_hf.create_dataset('jetConstituentsList', data=jet_PFCands)
         side_hf.create_dataset('eventFeatures', data=side_jj)
         side_hf.create_dataset('particleFeatureNames', data=pf_names)
         side_hf.create_dataset('eventFeatureNames', data=ef_names)
