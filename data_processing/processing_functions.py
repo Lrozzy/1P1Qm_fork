@@ -52,7 +52,7 @@ def uncluster(jet_data,min_pt=100,test=False):
                 exc_subjets = fj.sorted_by_pt(jets.exclusive_subjets(2))
                 #import pdb;pdb.set_trace()
             else:
-                exc_subjets = fj.sorted_by_pt(jets.exclusive_subjets(2))
+                exc_subjets = fj.sorted_by_pt(jets.exclusive_subjets(0.25))
             
             nPFCands_softer.append(len(exc_subjets[1].constituents()))  
             for j,subjet in enumerate(exc_subjets[:2]): # descending order of pt
