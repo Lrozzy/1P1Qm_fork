@@ -9,14 +9,14 @@ from time import sleep
 signal='RSGraviton'#'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_signalregion_parts'#'AtoHZ'#
 def process_signal_region(filename):
     dt = h5py.special_dtype(vlen=str)
-    ipath='/web/abal/public_html/debug/'
+    ipath='/web/abal/public_html/debug/random_shit/'
     normalize = 1
     deta_jj = 1.3
     MJJ = 1200.
     jPt = 100.
     
     NUM_SELECTED_PFCANDS=8
-    outfolder = '/ceph/abal/QML/delphes/substructure/CA_decluster'
+    outfolder = '/ceph/abal/QML/delphes/substructure/debug'
     
     with h5py.File(filename, "r") as f:
         pf_names=np.array(f['particleFeatureNames'][()],dtype=dt)
