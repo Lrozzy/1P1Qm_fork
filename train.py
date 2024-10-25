@@ -126,7 +126,7 @@ print(f"args.trash_qubits: {args.trash_qubits}")
 
 
 
-cost_fn=loss.batch_semi_classical_cost
+cost_fn=loss.batch_quantum_cost
 qc.print_training_params()
 
 ### Initialize the weights randomly ###
