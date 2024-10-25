@@ -122,8 +122,10 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     for ref_wire,trash_wire in zip(ref_wires,auto_wires[-n_trash_qubits:]):
         qml.CSWAP(wires=[ancillary_wires[0], ref_wire, trash_wire])
     qml.Hadamard(ancillary_wires)
-    return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
-
+    #return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
+    fidelities = [qml.expval(qml.PauliZ(i)) for i in ancillary_wires]
+    
+    return qml.sum(*fidelities) / len(ancillary_wires)
 def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     """
     Defines the feature re-uploading quantum autoencoder (QAE) circuit with 2 layers.
@@ -198,8 +200,11 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         qml.Hadamard(ancilla)
         qml.CSWAP(wires=[ancilla, ref_wire, trash_wire])
         qml.Hadamard(ancilla)
-    return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
-
+    #return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
+    #import pdb;pdb.set_trace()
+    #fidelities = [qml.PauliZ(i) for i in ancillary_wires]
+    return [qml.probs(i) for i in ancillary_wires]
+    #return qml.expval(qml.sum(*fidelities)/len(ancillary_wires)) 
 class QuantumAutoencoder:
     """
     A class that constructs a Quantum Autoencoder (QAE) using pre-defined circuits.
