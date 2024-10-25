@@ -151,8 +151,8 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         qml.RY(radius*zenith, wires=w)   
         qml.RZ(radius*azimuth, wires=w)  
     # QAE Circuit
-    for item in subjet_comb_wires:
-        qml.CNOT(wires=item)
+    # for item in subjet_comb_wires:
+    #     qml.CNOT(wires=item)
     
     for phi,theta,omega,i in zip(weights[:N],weights[N:2*N],weights[2*N:3*N],auto_wires):
         qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
@@ -183,14 +183,14 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         # qml.CRY(radius*zenith,wires=item)
         # qml.CRZ(radius*azimuth,wires=item)
 
-    for item in subjet_comb_wires:
-        #qml.CNOT(wires=item)
-        w=item[0] # Upload the subjet features a third time 
-        zenith = inputs[:,w, index['eta']] # corresponding to eta
-        azimuth = inputs[:,w, index['phi']] # corresponding to phi
-        radius = inputs[:,w, index['pt']] # corresponding to pt
-        qml.CRY(radius*zenith,wires=item)
-        qml.CRZ(radius*azimuth,wires=item)
+    # for item in subjet_comb_wires:
+    #     #qml.CNOT(wires=item)
+    #     w=item[0] # Upload the subjet features a third time 
+    #     zenith = inputs[:,w, index['eta']] # corresponding to eta
+    #     azimuth = inputs[:,w, index['phi']] # corresponding to phi
+    #     radius = inputs[:,w, index['pt']] # corresponding to pt
+    #     qml.CRY(radius*zenith,wires=item)
+    #     qml.CRZ(radius*azimuth,wires=item)
 
     # for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
     #     qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
