@@ -5,6 +5,8 @@ def getIndex(which:str='particle',feat:str=None)->int:
         nameArray=particleFeatureNames
     elif which=='event':
         nameArray=eventFeatureNames
+    elif which=='jet':
+        nameArray=jetFeatureNames
     else:
         print("arg which must be either event or particle. Returning -1 as index")
         return -1
@@ -132,5 +134,8 @@ eventFeatureNames:list[str]=['mJJ', 'j1Pt', 'j1Eta', 'j1Phi', 'j1M', 'j1E', 'j2P
        'j2M', 'j2E', 'DeltaEtaJJ', 'DeltaPhiJJ']
 
 particleFeatureNames:list[str]=['eta', 'phi', 'pt']
-
+jetFeatureNames=['jet_pt', 'jet_eta', 'jet_phi', 'jet_energy',                                                                                    
+       'jet_nparticles', 'jet_sdmass', 'jet_tau1', 'jet_tau2',                                                                          
+       'jet_tau3', 'jet_tau4']
 feature_limits={'eta':{'min':-nnp.pi,'max':nnp.pi},'phi':{'min':-nnp.pi,'max':nnp.pi},'pt':{'min':0,'max':1.0}}
+assumed_limits={'pt':[1.0e-4,3000.],'eta':[-0.8,0.8],'phi':[-0.8,0.8]}
