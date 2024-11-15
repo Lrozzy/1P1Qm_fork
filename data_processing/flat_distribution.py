@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 def flatten_feature_distribution(feature, num_events=10):
 
     # Create bins for the feature distribution
-    min_feature = 1100.
-    max_feature = 7000.
+    min_feature = 150.
+    max_feature = 2400.
     #bins = [1126,1181,1246,1313,1383,1455,1530,1607,1687,1770,1856,1945,2037,2132,2231,2332,2438,2546,2659,2775,2895,3019,3147,3279,3416,3558,3704,3854,4010,4171,4337,4509,4686,4869,5058,5253,5500,5663,5877,6099,6328,6564,6808,8000]
     bins=np.arange(min_feature,max_feature,50)
     #print("Bins: ",bins)
@@ -49,13 +49,17 @@ if __name__ == '__main__':
     #base_dir='/storage/9/abal/CASE/delphes/qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/train/'
     #out_dir='/storage/9/abal/CASE/delphes/qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/flat_train/'
     base_dir='/ceph/abal/QML/delphes/substructure/CA_decluster/qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/train/'
-    out_dir='/ceph/abal/QML/delphes/substructure/CA_decluster/qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/flat_train/'
+    out_dir='/ceph/abal/QML/delphes/substructure/CA_decluster/qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/flat_train_j1pt/'
+    #base_dir='/ceph/abal/QML/JetClass/train/ZJets/'
+    #out_dir='/ceph/abal/QML/JetClass/flat_train/ZJets/'
+    
     pathlib.Path(out_dir).mkdir(parents=True,exist_ok=True)
 
     file_paths=glob.glob(os.path.join(base_dir,'*.h5'))
     j1pt_idx=1
     j2pt_idx=6
     mjj_idx=0
+    feature_to_flatten=j1pt_idx
     pfc=[]
     eventFeatures=[]
     PFCand_subjet_idx=[]
@@ -64,7 +68,7 @@ if __name__ == '__main__':
     subjet_labels=[]
     for i,file_path in enumerate(tqdm.tqdm(file_paths)):
         with h5py.File(file_path,'r') as f:
-            feature=f['eventFeatures'][:,mjj_idx]
+            feature=f['eventFeatures'][:,feature_to_flatten]
             sampled_indices=flatten_feature_distribution(feature)#sample_from_feature(feature,num_events=1000)#
             pfc.append(f['jetConstituentsList'][()][sampled_indices])
             eventFeatures.append(f['eventFeatures'][()][sampled_indices])
