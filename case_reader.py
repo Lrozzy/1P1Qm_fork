@@ -72,7 +72,7 @@ class CASEDelphesJetDataset(IterableDataset):
         min=ut.feature_limits[type]['min']
         max=ut.feature_limits[type]['max']
         max-=epsilon
-        assumed_limits={'pt':[epsilon,3000.],'eta':[-0.8,0.8],'phi':[-0.8,0.8]}
+        assumed_limits=ut.assumed_limits
         if type not in ['pt','eta','phi']:
             raise NameError("Type must be either of [pt,eta,phi]")
         print(f"Assuming fixed sample maxima: [{assumed_limits[type][0]},{assumed_limits[type][1]}] for variable {type}")
