@@ -6,11 +6,13 @@ Authors: Aritra Bal (KIT Karlsruhe) and Benedikt Maier (Imperial College, London
 
 ## Multi-core Training
 
+In this repository, we use Hydra for managing parameters, and WandB for experiment tracking.  
+
+Assuming that your config YAML file is placed in the directory `$HYDRA_CONF`, and has the name config.yaml, you may start training as:
 To train the autoencoder:
+    python3 train.py --config-path $HYDRA_CONF --config-name config
 
-    python3 train.py --train --wires ${QUBITS} --trash-qubits ${TRASH} -b 100 -e 15 --backend "autograd" --save --seed ${seed} --lr 0.005 --desc "'${DESC}'" --train_n ${TRAIN_N} --valid_n ${VALID_N} --save_dir ${SAVE_DIR} --data_dir ${DATA_DIR} --device lightning.kokkos
-
-The example above can be run on multiple cores using the `lightning.kokkos` device. In addition, set the values of the `OMP_PROC_BIND` and `OMP_NUM_THREADS` environment variables **before** you run the python script. 
+The example above can be run on multiple cores by setting the `lightning.kokkos` device in your configuration YAML. In addition, set the values of the `OMP_PROC_BIND` and `OMP_NUM_THREADS` environment variables **before** you run the python script.
 
     export OMP_PROC_BIND=spread
     export OMP_NUM_THREADS= <N_THREADS>
@@ -23,28 +25,28 @@ It is possible to use a GPU for accelerated training as well. To do this, change
 
 You can use the docker container here:
 
-    docker pull neutrinoman4/qml-lightning.gpu:v3.0
+    docker pull neutrinoman4/qml-lightning.gpu:v4.0
+
+Note: Check the version, it MUST be v4.0
 
 For running on Horeka@KIT (Slurm-based), read the documentation [here](https://www.nhr.kit.edu/userdocs/ftp/containers/).
 
 To run GPU jobs on an HTCondor cluster, take a look at the scripts in `condor_example/`.
 
-If your HPC cluster supports Singularity/Apptainer, then you may use it as follows: 
+If your HPC cluster supports Singularity/Apptainer, then you may use it as follows:
 
-     apptainer build qml-lightning-gpu.sif docker://neutrinoman4/qml-lightning.gpu:v3.0
+     apptainer build qml-lightning-gpu.sif docker://neutrinoman4/qml-lightning.gpu:v4.0
      apptainer shell qml-lightning-gpu.sif
 
 The Docker image is derived from the Pennylane Lightning GPU v0.38.0 docker image, and contains some additional relevant libraries.
 
 After you're all set up, run your code using the `train.py` script as shown below. The quantum circuit architecture is loaded from `quantum/architectures.py` and the loss function from `quantum/losses.py`. At the moment, two circuit architectures are defined: `circuit()` and `reuploading_circuit()`. You are free to try out new circuit architectures. The `train.py` method copies the current version of the `architecture.py` file to the `save_dir` as `save_dir/FROZEN_ARCHITECTURE.py`, in case you edit this file in between runs.
 
-    python3 train.py --train --wires ${QUBITS} --trash-qubits ${TRASH} -b 100 -e 15 --backend "autograd" --save --seed ${seed} --lr 0.005 --desc "'${DESC}'" --train_n ${TRAIN_N} --valid_n ${VALID_N} --save_dir ${SAVE_DIR} --data_dir ${DATA_DIR} --device lightning.gpu
-
-To get a description of the possible options, run `python3 train.py --help`
+    python3 train.py --config-path $HYDRA_CONF --config-name config
 
 ## Notes
 
-- The argument `--seed` (set here to `$RANDOM`) is used to identify a given training run, which is then further described by the text contained in the `--desc` argument.
+- The argument `seed` is used to identify a given training run, which is then further described by the text contained in the `desc` argument.
 - If `seed = S`, then a new subdirectory is created in the base save directory at the path `/path/to/base/directory/S` and your results are saved there.
 - The data loader is defined in `case_reader.py`, the quantum circuit architecture is defined in `quantum.architecture` and the loss function is defined in `quantum.losses`. Feel free to modify/add to it!
 
