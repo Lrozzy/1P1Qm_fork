@@ -22,7 +22,7 @@ In addition, don't forget to set the `PYTHONPATH` environment variable such that
 
 ## Recommended: GPU Training
 
-It is possible to use a GPU for accelerated training as well. To do this, change the argument to `--device lightning.gpu`. Note that for GPU acceleration with Pennylane, a GPU with Compute Capability $>=7.0$ and CUDA Version $>= 12.0$ is needed.
+It is possible to use a GPU for accelerated training as well. To do this, you must override the corresponding argument `device=lightning.gpu`. Note that for GPU acceleration with Pennylane, a GPU with Compute Capability $>=7.0$ and CUDA Version $>= 12.0$ is needed.
 
 You can use the docker container here:
 
@@ -43,7 +43,15 @@ The Docker image is derived from the Pennylane Lightning GPU v0.38.0 docker imag
 
 After you're all set up, run your code using the `train.py` script as shown below. The quantum circuit architecture is loaded from `quantum/architectures.py` and the loss function from `quantum/losses.py`. At the moment, two circuit architectures are defined: `circuit()` and `reuploading_circuit()`. You are free to try out new circuit architectures. The `train.py` method copies the current version of the `architecture.py` file to the `save_dir` as `save_dir/FROZEN_ARCHITECTURE.py`, in case you edit this file in between runs.
 
-    python3 train.py --config-path $HYDRA_CONF --config-name config
+    python3 train.py --config-path $HYDRA_CONF --config-name config device=lightning.gpu
+
+## Inference
+
+This can be run on either CPU or GPU, though using GPU does not lead to any noticeable improvements. The same hydra config that was used for training the network can be reused during inference, with some additional arguments as follows:
+
+    python3 test.py --config-path $HYDRA_CONF --config-name config +signal=grav_1p5_narrow
+
+There are more arguments that you can see in the examples, such as `log_wandb`, which logs all images to the same WandB run used to track the training.
 
 ## Notes
 
