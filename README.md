@@ -8,8 +8,8 @@ Authors: Aritra Bal (KIT Karlsruhe) and Benedikt Maier (Imperial College, London
 
 In this repository, we use Hydra for managing parameters, and WandB for experiment tracking.  
 
-Assuming that your config YAML file is placed in the directory `$HYDRA_CONF`, and has the name config.yaml, you may start training as:
-To train the autoencoder:
+Assuming that your config YAML file is placed in the directory `$HYDRA_CONF`, and has the name `config.yaml`, you can start training by running:
+    
     python3 train.py --config-path $HYDRA_CONF --config-name config
 
 The example above can be run on multiple cores by setting the `lightning.kokkos` device in your configuration YAML. In addition, set the values of the `OMP_PROC_BIND` and `OMP_NUM_THREADS` environment variables **before** you run the python script.
@@ -17,6 +17,7 @@ The example above can be run on multiple cores by setting the `lightning.kokkos`
     export OMP_PROC_BIND=spread
     export OMP_NUM_THREADS= <N_THREADS>
 
+Examples of config YAML files can be found in the directory `hydra_configs`.
 In addition, don't forget to set the `PYTHONPATH` environment variable such that it includes the base directory `qae_hep` (or whatever you named it).
 
 ## Recommended: GPU Training
