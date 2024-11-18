@@ -40,7 +40,6 @@ def main(cfg: DictConfig):
         except:
             print("WandB run not found. Logging disabled.")
             log_wandb = False
-    import pdb;pdb.set_trace()
     # Import frozen architecture if available
     try:
         import importlib.util
