@@ -36,10 +36,11 @@ def main(cfg: DictConfig):
                 run_id = f.read().strip()
 
             # Reuse the existing WandB run
-            wandb.init(project='quantum_autoencoder', id=run_id, resume="must", config=OmegaConf.to_container(cfg))
+            wandb.init(project='1P1Q', id=run_id, resume="must", config=OmegaConf.to_container(cfg))
         except:
             print("WandB run not found. Logging disabled.")
             log_wandb = False
+    import pdb;pdb.set_trace()
     # Import frozen architecture if available
     try:
         import importlib.util
@@ -104,27 +105,41 @@ def main(cfg: DictConfig):
     qcd_dataset.set_dataset_type(cfg.dataset)
     sig_dataset.set_dataset_type(cfg.dataset)
 
-    qcd_j1_etaphipt, qcd_j2_etaphipt, qcd_features, qcd_labels = qcd_dataset.load_for_inference()
-    sig_j1_etaphipt, sig_j2_etaphipt, sig_features, sig_labels = sig_dataset.load_for_inference()
-
+    if cfg.load:
+        qcd_fids_j1=nnp.load(os.path.join(dump_dir,'qcd_fids_j1.npy'))
+        sig_fids_j1=nnp.load(os.path.join(dump_dir,cfg.signal,'sig_fids_j1.npy'))
+        qcd_fids_j2=nnp.load(os.path.join(dump_dir,'qcd_fids_j2.npy'))
+        sig_fids_j2=nnp.load(os.path.join(dump_dir,cfg.signal,'sig_fids_j2.npy'))
+        qcd_costs_j1=nnp.load(os.path.join(dump_dir,'qcd_costs_j1.npy'))
+        sig_costs_j1=nnp.load(os.path.join(dump_dir,cfg.signal,'sig_costs_j1.npy'))
+        qcd_costs_j2=nnp.load(os.path.join(dump_dir,'qcd_costs_j2.npy'))
+        sig_costs_j2=nnp.load(os.path.join(dump_dir,cfg.signal,'sig_costs_j2.npy'))
+        qcd_features=nnp.load(os.path.join(dump_dir,'qcd_features.npy'))
+        sig_features=nnp.load(os.path.join(dump_dir,cfg.signal,'sig_features.npy'))
+        qcd_labels=nnp.zeros(qcd_fids_j1.shape[0])
+        sig_labels=nnp.ones(sig_fids_j1.shape[0])
     # Inference
-    qcd_costs_j1, qcd_fids_j1 = qAE.run_inference(qcd_j1_etaphipt, loss_fn=cost_fn)
-    qcd_costs_j2, qcd_fids_j2 = qAE.run_inference(qcd_j2_etaphipt, loss_fn=cost_fn)
-    sig_costs_j1, sig_fids_j1 = qAE.run_inference(sig_j1_etaphipt, loss_fn=cost_fn)
-    sig_costs_j2, sig_fids_j2 = qAE.run_inference(sig_j2_etaphipt, loss_fn=cost_fn)
+    else:
+        qcd_j1_etaphipt, qcd_j2_etaphipt, qcd_features, qcd_labels = qcd_dataset.load_for_inference()
+        sig_j1_etaphipt, sig_j2_etaphipt, sig_features, sig_labels = sig_dataset.load_for_inference()
+    
+        qcd_costs_j1, qcd_fids_j1 = qAE.run_inference(qcd_j1_etaphipt, loss_fn=cost_fn)
+        qcd_costs_j2, qcd_fids_j2 = qAE.run_inference(qcd_j2_etaphipt, loss_fn=cost_fn)
+        sig_costs_j1, sig_fids_j1 = qAE.run_inference(sig_j1_etaphipt, loss_fn=cost_fn)
+        sig_costs_j2, sig_fids_j2 = qAE.run_inference(sig_j2_etaphipt, loss_fn=cost_fn)
 
-    # Save results
-    pathlib.Path(os.path.join(dump_dir, cfg.signal)).mkdir(parents=True, exist_ok=True)
-    nnp.save(os.path.join(dump_dir, 'qcd_fids_j1.npy'), qcd_fids_j1)
-    nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_fids_j1.npy'), sig_fids_j1)
-    nnp.save(os.path.join(dump_dir, 'qcd_fids_j2.npy'), qcd_fids_j2)
-    nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_fids_j2.npy'), sig_fids_j2)
-    nnp.save(os.path.join(dump_dir, 'qcd_costs_j1.npy'), qcd_costs_j1)
-    nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_costs_j1.npy'), sig_costs_j1)
-    nnp.save(os.path.join(dump_dir, 'qcd_costs_j2.npy'), qcd_costs_j2)
-    nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_costs_j2.npy'), sig_costs_j2)
-    nnp.save(os.path.join(dump_dir, 'qcd_features.npy'), qcd_features)
-    nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_features.npy'), sig_features)
+        # Save results
+        pathlib.Path(os.path.join(dump_dir, cfg.signal)).mkdir(parents=True, exist_ok=True)
+        nnp.save(os.path.join(dump_dir, 'qcd_fids_j1.npy'), qcd_fids_j1)
+        nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_fids_j1.npy'), sig_fids_j1)
+        nnp.save(os.path.join(dump_dir, 'qcd_fids_j2.npy'), qcd_fids_j2)
+        nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_fids_j2.npy'), sig_fids_j2)
+        nnp.save(os.path.join(dump_dir, 'qcd_costs_j1.npy'), qcd_costs_j1)
+        nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_costs_j1.npy'), sig_costs_j1)
+        nnp.save(os.path.join(dump_dir, 'qcd_costs_j2.npy'), qcd_costs_j2)
+        nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_costs_j2.npy'), sig_costs_j2)
+        nnp.save(os.path.join(dump_dir, 'qcd_features.npy'), qcd_features)
+        nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_features.npy'), sig_features)
 
     # Plotting, ROC curve, and other analysis (the rest of your code goes here...)
     if scheme=='max':
@@ -266,7 +281,7 @@ def main(cfg: DictConfig):
     
     if log_wandb:
         for filename in glob.glob(os.path.join(plot_dir, "*.png")):
-            wandb.log({filename: wandb.Image(filename)})
+            wandb.log({os.path.split(filename)[-1].replace('*.png',''): wandb.Image(filename)})
 
 # Finish WandB run
     wandb.finish()
