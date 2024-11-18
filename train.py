@@ -23,7 +23,7 @@ def main(cfg: DictConfig):
     pathlib.Path(plot_dir).mkdir(parents=True, exist_ok=True)
 
     # Initialize WandB
-    run_str=f"ARITRA_{cfg.seed}"
+    run_str=f"{os.getlogin()}_{cfg.seed}"
     wandb.init(project="1P1Q", config=OmegaConf.to_container(cfg), name=run_str)
     with open(os.path.join(save_dir, "wandb_run_id.txt"), "w") as f:
         f.write(wandb.run.id)
