@@ -116,16 +116,22 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     
     for item in two_comb_wires: 
         qml.CNOT(wires=item)
-    
+
+    # FIXED: handle the case where ancillary_wires is an integer, which is the case when separate_ancilla is False
+    if len(ancillary_wires)==1:
+        ancillary_wirelist=ancillary_wires*len(ref_wires)
+    else:
+        ancillary_wirelist=ancillary_wires 
+
     # SWAP test to measure fidelity
-    qml.Hadamard(ancillary_wires)
-    for ref_wire,trash_wire in zip(ref_wires,auto_wires[-n_trash_qubits:]):
-        qml.CSWAP(wires=[ancillary_wires[0], ref_wire, trash_wire])
-    qml.Hadamard(ancillary_wires)
-    #return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
-    fidelities = [qml.expval(qml.PauliZ(i)) for i in ancillary_wires]
+    for ref_wire,trash_wire,ancilla in zip(ref_wires,auto_wires[-n_trash_qubits:],ancillary_wirelist):
+        qml.Hadamard(ancilla)
+        qml.CSWAP(wires=[ancilla, ref_wire, trash_wire])
+        qml.Hadamard(ancilla)
+    return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
+    #fidelities = [qml.expval(qml.PauliZ(i)) for i in ancillary_wires]
     
-    return qml.sum(*fidelities) / len(ancillary_wires)
+    #return qml.sum(*fidelities) / len(ancillary_wires)
 def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     """
     Defines the feature re-uploading quantum autoencoder (QAE) circuit with 2 layers.
@@ -194,16 +200,21 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
 
     for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
         qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
-
+    
+    # FIXED: handle the case where ancillary_wires is an integer, which is the case when separate_ancilla is False
+    if len(ancillary_wires)==1:
+        ancillary_wirelist=ancillary_wires*len(ref_wires)
+    else:
+        ancillary_wirelist=ancillary_wires 
     # SWAP test to measure fidelity
-    for ref_wire,trash_wire,ancilla in zip(ref_wires,auto_wires[-n_trash_qubits:],ancillary_wires):
+    for ref_wire,trash_wire,ancilla in zip(ref_wires,auto_wires[-n_trash_qubits:],ancillary_wirelist):
         qml.Hadamard(ancilla)
         qml.CSWAP(wires=[ancilla, ref_wire, trash_wire])
         qml.Hadamard(ancilla)
-    #return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
+    return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
     #import pdb;pdb.set_trace()
     #fidelities = [qml.PauliZ(i) for i in ancillary_wires]
-    return [qml.probs(i) for i in ancillary_wires]
+    #return [qml.probs(i) for i in ancillary_wires]
     #return qml.expval(qml.sum(*fidelities)/len(ancillary_wires)) 
 class QuantumAutoencoder:
     """
@@ -302,7 +313,7 @@ class QuantumTrainer():
     """
     def __init__(self, model: QuantumAutoencoder, lr: float = 0.001, optimizer: Callable = None, 
                  loss_fn: Callable = None, save: bool = True, train_max_n: int = 100000, 
-                 valid_max_n: int = 20000, epochs: int = 20, patience: int = 4, **kwargs: Any) -> None:
+                 valid_max_n: int = 20000, epochs: int = 20, patience: int = 4,wandb=None, **kwargs: Any) -> None:
         self.circuit=model.fetch_circuit()
         self.backend=model.fetch_backend()
         self.init_weights=kwargs['init_weights']
@@ -318,6 +329,7 @@ class QuantumTrainer():
         self.quantum_loss=loss_fn
         self.current_epoch=0
         self.is_evictable=False
+        self.wandb=wandb
         self.history={'train':[],'val':[],'accuracy':[]}
         print (f'Performing optimization with: {self.optim} | Setting Learning rate: {lr}')
         print ('Backend:',self.backend,'\n')
@@ -383,6 +395,8 @@ class QuantumTrainer():
                     batch_yield+=1
                     loss=self.iteration(data,train=True)
                     losses+=loss
+                    if self.wandb is not None:
+                        self.wandb.log({'train_loss': losses/batch_yield})
                 end=round(time.time(),2)
                 train_loss=losses/batch_yield
                 self.print_params('Current weights: \n\n')
@@ -397,6 +411,8 @@ class QuantumTrainer():
                 val_loss+=loss
                 val_batch_yield+=1
             val_loss=val_loss/val_batch_yield
+            if self.wandb is not None:
+                self.wandb.log({'val_loss': val_loss})
             #print (f'Epoch {n_epoch}: Train Loss:{train_loss} Val loss: {val_loss}')
             if n_epoch>0:
                 self.logger.info(f'Epoch {n_epoch}: Network with {len(auto_wires)} input qubits trained on {sample_counter} samples in {batch_yield} batches')
