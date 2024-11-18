@@ -1,233 +1,192 @@
-from argparse import ArgumentParser
-import os,pathlib
+import hydra
+from omegaconf import DictConfig,OmegaConf
+import os
+import pathlib
 import subprocess
-parser=ArgumentParser(description='select options to train quantum autoencoder')
-
-parser.add_argument('--seed',default='9999',type=str,help='Something to index the run')
-parser.add_argument('--train',default=False,action='store_true',help='train the damn network!')
-parser.add_argument('--wires',default=4,type=int,help='number of wires/qubits that the circuit needs to process(AB system)')
-parser.add_argument('--trash-qubits',default=1,type=int,help='number of qubits defining the B system, or the reference and trash states!')
-parser.add_argument('--shots',default=5000,type=int,help='number of shots for measurement of a given state')
-parser.add_argument('--train_n',default=100000,type=int,help='number of samples to train on')
-parser.add_argument('--valid_n',default=20000,type=int,help='number of samples to validate on')
-parser.add_argument('-b','--batch-size',default=1,type=int,help='batch size')
-parser.add_argument('-e','--epochs',default=20,type=int,help='number of epochs to train for')
-parser.add_argument('--backend',default='autograd')
-parser.add_argument('--device_name',default='default.qubit',help='device name for the quantum circuit. If you use lightning.kokkos, be sure \
-    to set the OMP_PROC_BIND and OMP_NUM_THREADS environment variables')
-parser.add_argument('--lr',default=0.01,type=float)
-parser.add_argument('--save',default=False,action='store_true',help='Set to true to save the model')
-parser.add_argument('--flat',default=False,action='store_true',help='Set to true to use flat mjj dist. for training')
-parser.add_argument('--evictable',default=False,action='store_true',help='Set to true if you are running on a cluster \
-                    where jobs are evictable. In that case, it will copy over checkpoints to CERN EOS.\
-                     At the moment, set destination manually in architectures.py')
-parser.add_argument('--separate_ancilla',default=False,action='store_true',help='Set to true if you want to use 1 ancilla qubit per trash/reference pair')
-parser.add_argument('--resume',default=False,action='store_true',help='Set to true if you want to resume training from last checkpoint')
-parser.add_argument('--desc',default='Training run',help='Set a description for logging purposes')
-parser.add_argument('--n_threads',default='8',type=str)
-parser.add_argument('--norm_pt',default=False,action='store_true')
-parser.add_argument('--substructure',default=False,action='store_true')
-parser.add_argument('--no_reuploading',action='store_false',default=True)
-parser.add_argument('--save_dir',default='/work/abal/qae_hep/saved_models/',type=str)
-parser.add_argument('--data_dir',default='/storage/9/abal/CASE/delphes/',type=str)
-args=parser.parse_args()
-
-print(f"Using device {args.device_name}")
-
-
-import glob,time
-import helpers.utils as ut
+import datetime
+import glob
+import time
 import matplotlib.pyplot as plt
+import helpers.utils as ut
 import case_reader as cr
 import helpers.path_setter as ps
-
-from loguru import logger
-import quantum.architectures as qc
 import quantum.losses as loss
-import datetime
+from loguru import logger
+import wandb
 
-device_name=args.device_name
-save_dir=os.path.join(args.save_dir,args.seed)
-plot_dir=os.path.join(save_dir,'plots')
-pathlib.Path(plot_dir).mkdir(parents=True,exist_ok=True)
+@hydra.main(config_path="./hydra_configs/", config_name="config")
+def main(cfg: DictConfig):
+    # Set up directories
+    base_dir:str=cfg.base_dir
+    save_dir = os.path.join(cfg.save_dir, cfg.seed)
+    plot_dir = os.path.join(save_dir, 'plots')
+    pathlib.Path(plot_dir).mkdir(parents=True, exist_ok=True)
 
+    # Initialize WandB
+    run_str=f"ARITRA_{cfg.seed}"
+    wandb.init(project="1P1Q", config=OmegaConf.to_container(cfg), name=run_str)
+    with open(os.path.join(save_dir, "wandb_run_id.txt"), "w") as f:
+        f.write(wandb.run.id)
 
-# The argument name is confusing. If no_reuploading is set to True (which is the default), then reuploading is (counter-intuitively) set to True
-# Otherwise, we need 3*N_QUBITS parameters for the circuit
-# This confusing name exists within the code so that the user can switch off reuploading by passing a flag --no_reuploading
-use_reuploading=args.no_reuploading # default is True
-
-if args.resume:
-    test_args=ut.Unpickle(os.path.join(save_dir,'args.pickle'))
-    import importlib;qc=importlib.import_module('saved_models.'+args.seed+'.FROZEN_ARCHITECTURE')
-    model_path=sorted(glob.glob(os.path.join(save_dir,'checkpoints','ep*.pickle')))[-1]
-    init_weights=ut.Unpickle(model_path)
-    
-    
-    logger.add(os.path.join(args.save_dir,'logs.log'),rotation='10 MB',backtrace=True,diagnose=True,level='DEBUG', mode="a")
+    # Logging setup
+    logger.add(os.path.join(save_dir, 'logs.log'), rotation='10 MB', backtrace=True, diagnose=True, level='DEBUG', mode="w")
     logger.info("########################################### \n\n")
-    logger.info(f"Resuming training from last checkpoint at {model_path}")
-    logger.info(f"Using arguments specified in original training run")
-    logger.info(f"Training resumed at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
-    logger.info("Current weights are: ",init_weights)
-    logger.info("\n\n ########################################### \n\n")
-    args=test_args
-    args.seed=str(args.seed)
-
-
-else:
-    ### Initialize the quantum autoencoder ##
-    logger.add(os.path.join(save_dir,'logs.log'),rotation='10 MB',backtrace=True,diagnose=True,level='DEBUG', mode="w")
-    logger.info("########################################### \n\n")
-    if args.separate_ancilla:
-        logger.info(f"This circuit contains {args.wires+2*args.trash_qubits} qubits")
+    
+    if cfg.separate_ancilla:
+        logger.info(f"This circuit contains {cfg.wires + 2 * cfg.trash_qubits} qubits")
     else:
-        logger.info(f"This circuit contains {args.wires+args.trash_qubits+1} qubits")
-    logger.info("\n\n ########################################### \n\n")
-    print("Will save models to: ",save_dir)
-    tmpfile=os.path.join(save_dir,'FROZEN_ARCHITECTURE.py')
-    subprocess.call('cp quantum/architectures.py '+tmpfile,shell=True)
-    tmpfile=os.path.join(save_dir,'FROZEN_DATAREADER.py')
-    subprocess.call('cp case_reader.py '+tmpfile,shell=True)
-
-logger.info(f"Feature are scaled to the following limits: {ut.feature_limits}")
-
-  
-
-if args.norm_pt:
-    logger.info(f"pT will not be scaled to the above limit. Will be normalized using 1/jet_pt")
-else:
-    logger.info(f"pT will also be scaled assuming above maxima")
-if args.flat:
-    logger.info("Using flat mjj distribution for training")
-
-
-args.non_trash=args.wires-args.trash_qubits
-assert args.non_trash>0,'Need strictly positive dimensional compressed representation of input state!'
-qAE=qc.QuantumAutoencoder(wires=args.wires, shots=args.shots, trash_qubits=args.trash_qubits, dev_name=device_name,separate_ancilla=args.separate_ancilla)
-qAE.set_circuit(reuploading=use_reuploading)
-
-if use_reuploading: 
-    NUM_WEIGHTS=len(qc.auto_wires)*6
-else:
-    NUM_WEIGHTS=len(qc.auto_wires)*3  
+        logger.info(f"This circuit contains {cfg.wires + cfg.trash_qubits + 1} qubits")
     
-if not args.resume:
-    init_weights=qc.np.random.uniform(0,qc.np.pi,size=(NUM_WEIGHTS,), requires_grad=True)
+    print("Will save models to: ", save_dir)
 
-train_max_n=args.train_n
-valid_max_n=args.valid_n
+    # Save initial arguments for logging purposes
+    ut.Pickle(cfg, 'args', path=save_dir)
+    with open(os.path.join(save_dir, 'args.txt'), 'w+') as f:
+        f.write(repr(cfg))
 
+    # Further setup based on config
+    use_reuploading = cfg.use_reuploading  # default is True
 
-print(f"args.wires: {args.wires}")
-print(f"args.trash_qubits: {args.trash_qubits}")
+    if cfg.resume:
+        test_args = ut.Unpickle(os.path.join(save_dir, 'args.pickle'))
+        import importlib; qc = importlib.import_module('saved_models.' + cfg.seed + '.FROZEN_ARCHITECTURE')
+        model_path = sorted(glob.glob(os.path.join(save_dir, 'checkpoints', 'ep*.pickle')))[-1]
+        init_weights = ut.Unpickle(model_path)
 
-# Set device name
+        logger.add(os.path.join(cfg.save_dir, 'logs.log'), rotation='10 MB', backtrace=True, diagnose=True, level='DEBUG', mode="a")
+        logger.info("########################################### \n\n")
+        logger.info(f"Resuming training from last checkpoint at {model_path}")
+        logger.info(f"Using arguments specified in original training run")
+        logger.info(f"Training resumed at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
+        logger.info("Current weights are: ", init_weights)
+        logger.info("\n\n ########################################### \n\n")
+        cfg = test_args
+        cfg.seed = str(cfg.seed)
+    else:
+        import quantum.architectures as qc
+        logger.info("########################################### \n\n")
+        if cfg.separate_ancilla:
+            logger.info(f"This circuit contains {cfg.wires + 2 * cfg.trash_qubits} qubits")
+        else:
+            logger.info(f"This circuit contains {cfg.wires + cfg.trash_qubits + 1} qubits")
+        logger.info("\n\n ########################################### \n\n")
+        tmpfile = os.path.join(save_dir, 'FROZEN_ARCHITECTURE.py')
+        subprocess.run(['cp', os.path.join(base_dir,'quantum/architectures.py') ,tmpfile])
+        tmpfile = os.path.join(save_dir, 'FROZEN_DATAREADER.py')
+        subprocess.run(['cp', os.path.join(base_dir,'case_reader.py'), tmpfile])
+        import pdb;pdb.set_trace()
 
+    logger.info(f"Feature are scaled to the following limits: {ut.feature_limits}")
 
+    if cfg.norm_pt:
+        logger.info(f"pT will not be scaled to the above limit. Will be normalized using 1/jet_pt")
+    else:
+        logger.info(f"pT will also be scaled assuming above maxima")
+    if cfg.flat:
+        logger.info("Using flat mjj distribution for training")
 
-cost_fn=loss.batch_quantum_cost
-qc.print_training_params()
+    non_trash = cfg.wires - cfg.trash_qubits
+    assert non_trash > 0, 'Need strictly positive dimensional compressed representation of input state!'
+    qAE = qc.QuantumAutoencoder(wires=cfg.wires, shots=cfg.shots, trash_qubits=cfg.trash_qubits, dev_name=cfg.device_name, separate_ancilla=cfg.separate_ancilla)
+    qAE.set_circuit(reuploading=use_reuploading)
 
-### Initialize the weights randomly ###
+    if use_reuploading:
+        NUM_WEIGHTS = len(qc.auto_wires) * 6
+    else:
+        NUM_WEIGHTS = len(qc.auto_wires) * 3
 
+    if not cfg.resume:
+        init_weights = qc.np.random.uniform(0, qc.np.pi, size=(NUM_WEIGHTS,), requires_grad=True)
 
+    train_max_n = cfg.train_n
+    valid_max_n = cfg.valid_n
+    if cfg.loss=='quantum':
+        cost_fn = loss.batch_quantum_cost
+        logger.info("Using qml.probs() to compute fidelity")
+    else:
+        cost_fn = loss.batch_semi_classical_cost
+        logger.info("Using qml.expval(Z) for fidelity computation")
+    qc.print_training_params()
 
-### Save initial arguments for logging purposes to a text file ###
-ut.Pickle(args,'args',path=save_dir)
-with open(os.path.join(save_dir,'args.txt'),'w+') as f:
-    f.write(repr(args))
+    # Save initial arguments for logging purposes
+    ut.Pickle(cfg, 'args', path=save_dir)
+    with open(os.path.join(save_dir, 'args.txt'), 'w+') as f:
+        f.write(repr(cfg))
 
+    # Load the data and create a dataloader
+    data_key = 'QCD_flat_pt' if cfg.flat else 'QCD_train'
+    val_key = 'QCD_test'
 
-### Load the data and create a dataloader ###
+    logger.info(f'loading data from {ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key)}')
+    train_filelist = sorted(glob.glob(os.path.join(ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key), '*.h5')))
+    val_filelist = sorted(glob.glob(os.path.join(ps.PathSetter(data_path=cfg.data_dir).get_data_path(val_key), '*.h5')))
 
-if args.flat:
-    data_key='QCD_flat'
-else:
-    data_key='QCD_train'
+    if (len(train_filelist) == 0) or (len(val_filelist) == 0):
+        raise FileNotFoundError(f"Could not find files in {ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key)} or {ps.PathSetter(data_path=cfg.data_dir).get_data_path(val_key)}")
 
-val_key='QCD_test'
+    logger.info(f"Training on {len(train_filelist)} files found at {ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key)}")
+    logger.info(f"Validating on {len(val_filelist)} files found at {ps.PathSetter(data_path=cfg.data_dir).get_data_path(val_key)}")
 
-# if args.SR:
-#     val_key='QCD_SR_test'
-#     logger.info(f"Using signal region MC for training")
-#     if args.flat:
-#         data_key='QCD_SR_train_flat'
-#     else:
-#         data_key='QCD_SR_train'
+    train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist, batch_size=cfg.batch_size, input_shape=(len(qc.auto_wires), 3), train=True,
+                                            max_samples=train_max_n, normalize_pt=cfg.norm_pt, use_subjet_PFCands=cfg.substructure,logger=logger,dataset=cfg.dataset)
+    val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist, batch_size=cfg.batch_size, input_shape=(len(qc.auto_wires), 3), train=False,
+                                          max_samples=valid_max_n, normalize_pt=cfg.norm_pt, use_subjet_PFCands=cfg.substructure,dataset=cfg.dataset)
 
-logger.info(f'loading data from {ps.PathSetter(data_path=args.data_dir).get_data_path(data_key)}')
-train_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path(data_key),'*.h5')))
-val_filelist=sorted(glob.glob(os.path.join(ps.PathSetter(data_path=args.data_dir).get_data_path(val_key),'*.h5')))
+    # Initialize the optimizer
+    optimizer = qc.qml.AdamOptimizer(stepsize=cfg.lr)
 
+    # Initialize the trainer with WandB
+    trainer = qc.QuantumTrainer(qAE, lr=cfg.lr, backend_name=cfg.backend, init_weights=init_weights, device_name=cfg.device_name,
+                                train_max_n=train_max_n, valid_max_n=valid_max_n, epochs=cfg.epochs, batch_size=cfg.batch_size,
+                                logger=logger, save=cfg.save, patience=4, optimizer=optimizer, loss_fn=cost_fn, wandb=wandb)
 
+    trainer.print_params('Initialized parameters!')
+    trainer.set_directories(save_dir)
 
-if (len(train_filelist)==0) or (len(val_filelist)==0):
-    raise FileNotFoundError(f"Could not find files in {ps.PathSetter(data_path=args.data_dir).get_data_path(data_key)} or {ps.PathSetter(data_path=args.data_dir).get_data_path(val_key)}")
+    if cfg.resume:
+        trainer.set_current_epoch(ut.get_current_epoch(model_path))
+        logger.info(f"Resuming training from epoch {trainer.current_epoch}")
+    else:
+        logger.info(f"Training started at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
+        logger.info(f'Epochs: {cfg.epochs} | Learning rate: {cfg.lr} | Batch size: {cfg.batch_size} \nBackend: {cfg.backend} | Wires: {cfg.wires} | Trash qubits: {cfg.trash_qubits} | Shots: {cfg.shots} \n')    
+        logger.info(f'Additional information: {cfg.desc}')
 
-logger.info(f"Training on {len(train_filelist)} files found at {ps.PathSetter(data_path=args.data_dir).get_data_path(data_key)}")
-logger.info(f"Validating on {len(val_filelist)} files found at {ps.PathSetter(data_path=args.data_dir).get_data_path(val_key)}")
+    if cfg.evictable:
+        trainer.is_evictable_job(seed=cfg.seed)
 
-train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=True\
-                                        ,max_samples=train_max_n,normalize_pt=args.norm_pt,use_subjet_PFCands=args.substructure)
-val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist,batch_size=args.batch_size,input_shape=(len(qc.auto_wires),3),train=False,\
-                                      max_samples=valid_max_n,normalize_pt=args.norm_pt,use_subjet_PFCands=args.substructure) 
+    # Begin training
+    abs_start = time.time()
+    try:
+        history = trainer.run_training_loop(train_loader, val_loader)
+    except KeyboardInterrupt:
+        print("WHYYYYY")
+        print("DON'T PRESS CTRL+C AGAIN. I'M TRYING TO SAVE THE CURRENT MODEL AND WRITE TO LOG!")
+        trainer.save(save_dir, name='aborted_weights.pickle')
+        trainer.print_params('Training aborted. Current parameters are: ')
+    finally:
+        logger.info('Training completed with the following parameters:')
+        trainer.print_params('Trained parameters:')
+        history = trainer.fetch_history()
+        print(history)
+        if cfg.save:
+            done_epochs = len(history['train'])
+            ut.Pickle(history, 'history', path=save_dir)
+            fig, axes = plt.subplots(figsize=(15, 12))
+            axes.plot(qc.np.arange(done_epochs), history['train'], label='train', linewidth=2)
+            axes.plot(qc.np.arange(done_epochs + 1), history['val'], label='val', linewidth=2)
+            axes.set_xlabel('Epochs', size=25)
+            axes.set_ylabel('$1-<T|F> $(in %)', size=25)
+            axes.set_xticks(qc.np.arange(0, done_epochs + 1, 5))
+            axes.legend(prop={'size': 25})
 
-### Initialize the optimizer ###
-optimizer=qc.qml.AdamOptimizer(stepsize=args.lr)
+            axes.tick_params(labelsize=20)
+            fig.savefig(os.path.join(save_dir, 'history'))
+            abs_end = time.time()
+            logger.info(f"Training finished at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
+            logger.info(f"Total time taken including all overheads: {abs_end - abs_start:.2f} seconds")
 
-### Initialize the trainer ###
-trainer=qc.QuantumTrainer(qAE,lr=args.lr,backend_name=args.backend,init_weights=init_weights,device_name=device_name,\
-                          train_max_n=train_max_n,valid_max_n=valid_max_n,epochs=args.epochs,batch_size=args.batch_size,\
-                            logger=logger,save=args.save,patience=4,optimizer=optimizer,loss_fn=cost_fn)
+        # Close WandB run
+        wandb.finish()
 
-trainer.print_params('Initialized parameters!')
-trainer.set_directories(save_dir)
-
-if args.resume: 
-    trainer.set_current_epoch(ut.get_current_epoch(model_path))
-    logger.info(f"Resuming training from epoch {trainer.current_epoch}")
-else:
-    logger.info(f"Training started at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
-    logger.info(f'Epochs: {args.epochs} | Learning rate: {args.lr} | Batch size: {args.batch_size} \nBackend: {args.backend} | Wires: {args.wires} | Trash qubits: {args.trash_qubits} | Shots: {args.shots} \n')    
-    logger.info(f'Additional information: {args.desc}')
-
-if args.evictable:
-    trainer.is_evictable_job(seed=args.seed)
-### Begin logging ###
-
-
-
-
-### Begin training ###
-abs_start=time.time()
-try:
-    history=trainer.run_training_loop(train_loader,val_loader)
-except KeyboardInterrupt:
-    print("WHYYYYY")
-    print("DON'T PRESS CTRL+C AGAIN. I'M TRYING TO SAVE THE CURRENT MODEL AND WRITE TO LOG!") 
-    trainer.save(save_dir,name='aborted_weights.pickle')
-    trainer.print_params('Training aborted. Current parameters are: ')
-finally:
-    logger.info('Training completed with the following parameters:')
-    trainer.print_params('Trained parameters:')
-    history=trainer.fetch_history()
-    print (history)
-    if args.save:
-        done_epochs=len(history['train'])
-        ut.Pickle(history,'history',path=save_dir)
-        fig,axes=plt.subplots(figsize=(15,12))
-        axes.plot(qc.np.arange(done_epochs),history['train'],label='train',linewidth=2)
-        axes.plot(qc.np.arange(done_epochs+1),history['val'],label='val',linewidth=2)
-        axes.set_xlabel('Epochs',size=25)
-        axes.set_ylabel('$1-<T|F> $(in %)',size=25)
-        axes.set_xticks(qc.np.arange(0,done_epochs+1,5))
-        axes.legend(prop={'size':25})
-
-        axes.tick_params(labelsize=20)
-        fig.savefig(os.path.join(save_dir,'history'))
-        abs_end=time.time()
-        logger.info(f"Training finished at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
-        logger.info(f"Total time taken including all overheads: {abs_end-abs_start:.2f} seconds")
-    
-
+if __name__ == "__main__":
+    main()
