@@ -117,25 +117,14 @@ def folder_save(events,folder_name,save_path,append=False):
     os.chdir(pwd)
     return
 
-path_dict:dict[str:str]={'QCD_train':'/storage/9/abal/CASE/delphes/qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/train/',
-           'QCD_test':'/storage/9/abal/CASE/delphes/qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/test/',
-           'QAE_save':'/work/abal/qae_hep/saved_models/',
-           'QCD_lib':'/storage/9/abal/CASE/delphes/qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/library/',
-           'grav_2p5_narrow':'/storage/9/abal/CASE/delphes/grav_2p5_na/',
-           'grav_1p5_narrow':'/storage/9/abal/CASE/delphes/grav_1p5_na/',
-           'grav_3p5_narrow':'/storage/9/abal/CASE/delphes/grav_3p5_na/',
-            'grav_4p5_narrow':'/storage/9/abal/CASE/delphes/grav_4p5_na/',
-           'grav_3p5_broad':'/storage/9/abal/CASE/delphes/grav_3p5_br/',
-           'grav_2p5_broad':'/storage/9/abal/CASE/delphes/grav_2p5_br/',
-           'grav_1p5_broad':'/storage/9/abal/CASE/delphes/grav_1p5_br/',
-           }
-
 eventFeatureNames:list[str]=['mJJ', 'j1Pt', 'j1Eta', 'j1Phi', 'j1M', 'j1E', 'j2Pt',
        'j2M', 'j2E', 'DeltaEtaJJ', 'DeltaPhiJJ']
 
 particleFeatureNames:list[str]=['eta', 'phi', 'pt']
+
 jetFeatureNames=['jet_pt', 'jet_eta', 'jet_phi', 'jet_energy',                                                                                    
        'jet_nparticles', 'jet_sdmass', 'jet_tau1', 'jet_tau2',                                                                          
        'jet_tau3', 'jet_tau4']
+
 feature_limits={'eta':{'min':-nnp.pi,'max':nnp.pi},'phi':{'min':-nnp.pi,'max':nnp.pi},'pt':{'min':0,'max':1.0}}
 assumed_limits={'pt':[1.0e-4,3000.],'eta':[-0.8,0.8],'phi':[-0.8,0.8]}
