@@ -23,7 +23,11 @@ def main(cfg: DictConfig):
     pathlib.Path(plot_dir).mkdir(parents=True, exist_ok=True)
 
     # Initialize WandB
-    run_str=f"{os.getlogin()}_{cfg.seed}"
+    try:
+        run_str=f"{os.getlogin()}_{cfg.seed}"
+    except:
+        run_str=f"abal_{cfg.seed}"
+    
     wandb.init(project="1P1Q", config=OmegaConf.to_container(cfg), name=run_str)
     with open(os.path.join(save_dir, "wandb_run_id.txt"), "w") as f:
         f.write(wandb.run.id)
@@ -74,8 +78,8 @@ def main(cfg: DictConfig):
         subprocess.run(['cp', os.path.join(base_dir,'quantum/architectures.py') ,tmpfile])
         tmpfile = os.path.join(save_dir, 'FROZEN_DATAREADER.py')
         subprocess.run(['cp', os.path.join(base_dir,'case_reader.py'), tmpfile])
-        import pdb;pdb.set_trace()
-
+        
+        
     logger.info(f"Feature are scaled to the following limits: {ut.feature_limits}")
 
     if cfg.norm_pt:
