@@ -26,9 +26,9 @@ It is possible to use a GPU for accelerated training as well. To do this, you mu
 
 You can use the docker container here:
 
-    docker pull neutrinoman4/qml-lightning.gpu:v4.0
+    docker pull neutrinoman4/qml-lightning.gpu:v5.0
 
-Note: Check the version, it MUST be v4.0
+Note: Check the version, it MUST be v5.0
 
 For running on Horeka@KIT (Slurm-based), read the documentation [here](https://www.nhr.kit.edu/userdocs/ftp/containers/).
 
