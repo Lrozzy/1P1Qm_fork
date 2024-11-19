@@ -28,7 +28,7 @@ def main(cfg: DictConfig):
     except:
         run_str=f"abal_{cfg.seed}"
     
-    wandb.init(project="1P1Q", config=OmegaConf.to_container(cfg), name=run_str)
+    wandb.init(project="1P1Q", config=OmegaConf.to_container(cfg), name=run_str,notes=cfg.desc)
     with open(os.path.join(save_dir, "wandb_run_id.txt"), "w") as f:
         f.write(wandb.run.id)
 
