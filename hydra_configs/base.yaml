@@ -1,4 +1,5 @@
 seed: 'base'
+base_dir: '/work/abal/qae_hep/'
 train: true
 dataset: 'delphes'
 wires: 4
