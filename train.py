@@ -131,9 +131,9 @@ def main(cfg: DictConfig):
     logger.info(f"Training on {len(train_filelist)} files found at {ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key)}")
     logger.info(f"Validating on {len(val_filelist)} files found at {ps.PathSetter(data_path=cfg.data_dir).get_data_path(val_key)}")
 
-    train_loader = cr.CASEDelphesDataLoader(filelist=train_filelist, batch_size=cfg.batch_size, input_shape=(len(qc.auto_wires), 3), train=True,
+    train_loader = cr.OneP1QDataLoader(filelist=train_filelist, batch_size=cfg.batch_size, input_shape=(len(qc.auto_wires), 3), train=True,
                                             max_samples=train_max_n, normalize_pt=cfg.norm_pt, use_subjet_PFCands=cfg.substructure,logger=logger,dataset=cfg.dataset)
-    val_loader = cr.CASEDelphesDataLoader(filelist=val_filelist, batch_size=cfg.batch_size, input_shape=(len(qc.auto_wires), 3), train=False,
+    val_loader = cr.OneP1QDataLoader(filelist=val_filelist, batch_size=cfg.batch_size, input_shape=(len(qc.auto_wires), 3), train=False,
                                           max_samples=valid_max_n, normalize_pt=cfg.norm_pt, use_subjet_PFCands=cfg.substructure,dataset=cfg.dataset)
 
     # Initialize the optimizer

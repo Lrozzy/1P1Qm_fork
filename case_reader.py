@@ -238,7 +238,7 @@ class CASEDelphesJetDataset(IterableDataset):
                 else:
                     yield np.array(batch_data,requires_grad=False), np.array(batch_labels,requires_grad=False)
 
-def CASEDelphesDataLoader(input_shape:tuple[int]=(100, 3),train:bool=True,use_subjet_PFCands:bool=False,dataset='delphes',**kwargs) -> DataLoader:
+def OneP1QDataLoader(input_shape:tuple[int]=(100, 3),train:bool=True,use_subjet_PFCands:bool=False,dataset='delphes',**kwargs) -> DataLoader:
     '''
     Wrapper function to create a DataLoader for the CASEDelphesJetDataset.
     Args:
@@ -343,7 +343,7 @@ class CASEJetClassDataset(CASEDelphesJetDataset):
     
         
 
-def select_subjet_constituents(num_PFCands_subleading_jet, evt_subjet_idx, jet_etaphipt, n_qubits=8,selection='equal'):
+def select_subjet_constituents(jet_etaphipt, num_PFCands_subleading_jet, evt_subjet_idx, n_qubits=8,selection='equal'):
     """
     Selects a fixed number of particles per jet, filling with random sampling if needed.
 
@@ -356,132 +356,49 @@ def select_subjet_constituents(num_PFCands_subleading_jet, evt_subjet_idx, jet_e
     Returns:
     - jet_etaphipt_selected: (N, n_qubits, 3) array of selected particles per jet.
     """
+    if n_qubits%2!=0:
+        raise ValueError("No. of particles to select = no. of qubits must be even")
     N = jet_etaphipt.shape[0]  # Number of jets
 
     # Step 1: Create mask limit to determine how many particles can be selected from each subjet
     if selection=='random':
-        mask_limit = 4*np.ones([N,1])#np.where(num_PFCands_subleading_jet > n_qubits // 2, n_qubits // 2, n_qubits - num_PFCands_subleading_jet)  # (N,)
+        mask_limit = (n_qubits//2)*np.ones([N,1])#np.where(num_PFCands_subleading_jet > n_qubits // 2, n_qubits // 2, n_qubits - num_PFCands_subleading_jet)  # (N,)
+        pf_mask = evt_subjet_idx < mask_limit  # (N, 100)
+        
+    # Step 3: Ensure each jet has exactly n_qubits particles
+        selected_particles = []
+        print("It is now necessary to run an event loop in python")
+        print("My sincere apologies")
+        import time;time.sleep(3)
+        for i in range(N):
+            jet_particles = jet_etaphipt[i]  # (100, 3)
+            mask = pf_mask[i]  # (100,)
+            selected = jet_particles[mask]  # Select particles based on mask
+            selected_idx=evt_subjet_idx[i][mask]
+            if len(selected) < n_qubits:
+                # Randomly sample additional particles to reach n_qubits
+                non_padded_indices = np.where(~mask)[0]  # Indices of non-padded particles
+                num_additional = n_qubits - len(selected)
+                additional_indices = np.random.choice(non_padded_indices, size=num_additional, replace=False)
+                additional_particles = jet_particles[additional_indices]
+                selected = np.vstack((selected, additional_particles))
+
+            selected_particles.append(selected)
+
+        # Step 4: Convert the list to a numpy array of shape (N, n_qubits, 3)
+        jet_etaphipt_selected = np.array(selected_particles)  # (N, n_qubits, 3)
+
     elif selection=='equal':
         mask_limit = np.where(num_PFCands_subleading_jet > n_qubits // 2, n_qubits // 2, n_qubits - num_PFCands_subleading_jet)  # (N,)
+        pf_mask=evt_subjet_idx<mask_limit
+        extra_mask=np.sum(pf_mask,axis=1)==n_qubits
+        import pdb;pdb.set_trace()
+        jet_etaphipt=jet_etaphipt[extra_mask] # N x n_qubits x 3 
+        pf_mask=pf_mask[extra_mask]
+        jet_etaphipt_selected=jet_etaphipt[pf_mask].reshape(-1,n_qubits,3) # N x 2 x n_qubits x 3
+
     else:
         raise NameError("Selection must be either random or equal")
     # Step 2: Create a mask to select particles from each jet
     
-    pf_mask = evt_subjet_idx < mask_limit  # (N, 100)
-        
-    # Step 3: Ensure each jet has exactly n_qubits particles
-    selected_particles = []
-    print("It is now necessary to run an event loop in python")
-    print("My sincere apologies")
-    import time;time.sleep(3)
-    for i in range(N):
-        jet_particles = jet_etaphipt[i]  # (100, 3)
-        mask = pf_mask[i]  # (100,)
-        selected = jet_particles[mask]  # Select particles based on mask
-
-        if len(selected) < n_qubits:
-            # Randomly sample additional particles to reach n_qubits
-            non_padded_indices = np.where(evt_subjet_idx[i] != 999)[0]  # Indices of non-padded particles
-            num_additional = n_qubits - len(selected)
-            additional_indices = np.random.choice(non_padded_indices, size=num_additional, replace=False)
-            additional_particles = jet_particles[additional_indices]
-            selected = np.vstack((selected, additional_particles))
-
-        selected_particles.append(selected)
-
-    # Step 4: Convert the list to a numpy array of shape (N, n_qubits, 3)
-    jet_etaphipt_selected = np.array(selected_particles)  # (N, n_qubits, 3)
-
     return jet_etaphipt_selected
-
-
-
-
-########## REDUNDANT STUFF ############
-
-
-
-def fixed_rescale(data: np.ndarray, min: float = 0.0, max: float = 1.0, epsilon: float = 1.0e-4, type='pt') -> np.ndarray:
-    """
-    Rescales the data to a specified range. 
-    Does not use sample min/max values, but fixed values instead.
-
-    Args:
-        data (np.ndarray): Input data to rescale.
-        min (float): Minimum value of the scaled data.
-        max (float): Maximum value of the scaled data.
-        epsilon (float): Small offset to prevent numerical instability.
-
-    Returns:
-        np.ndarray: Rescaled data.
-    """
-    assumed_limits={'pt':[epsilon,3000.],'eta':[-0.8,0.8],'phi':[-0.8,0.8]}
-    if type not in ['pt','eta','phi']:
-        raise NameError("Type must be either of [pt,eta,phi]")
-    
-    data_shape = data.shape
-    data_scaled = ((data - assumed_limits[type][0])/(assumed_limits[type][1]-assumed_limits[type][0]))*(max-min) + min # scale using fixed values of 
-    #import pdb;pdb.set_trace()
-    
-    return data_scaled.reshape(data_shape[0], data_shape[1])
-
-def fixed_rescale_and_reshape(data: np.ndarray)-> np.ndarray:
-    '''
-    Rescales the input data for a given jet PFCand array.
-
-    Args: 
-        data (np.ndarray): Data of shape [N,n_inputs,3] to be rescaled
-    Returns:
-        np.ndarray: Data rescaled for the input jet array
-        Note that the rescaling is performed with a fixed max/min value for each variable
-    '''
-    pt_index=ut.getIndex('particle','pt')
-    eta_index=ut.getIndex('particle','eta')
-    phi_index=ut.getIndex('particle','phi')
-    
-    data[:, :, pt_index] = fixed_rescale(data[:, :, pt_index], min=0., max=1.0, epsilon=1.0e-4)
-    data[:, :, eta_index] = fixed_rescale(data[:, :, eta_index], min=0., max=nnp.pi, epsilon=0,type='eta')
-    data[:, :, phi_index] = fixed_rescale(data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=0,type='phi')
-    return data
-
-def rescale_and_reshape(data: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
-    '''
-    Rescales and reshapes the input data for jets 1 and 2.
-
-    Args: 
-        data (np.ndarray): Data of shape [N,2,n_inputs,3] to be rescaled and reshaped.
-    Returns:
-        np.ndarray,np.ndarray: Data rescaled and reshaped for jets 1 and 2
-        Note that the rescaling is performed first, taking both jets of an event into account and only then is it reshaped into 2 separate jets
-    '''
-    pt_index=ut.getIndex('particle','pt')
-    eta_index=ut.getIndex('particle','eta')
-    phi_index=ut.getIndex('particle','phi')
-    data_len=nnp.cumsum([arr.shape[0] for arr in data])
-    print(data_len)
-    
-    stacked_data = nnp.concatenate(data, axis=0)
-    stacked_data[:, :, pt_index] = rescale(stacked_data[:, :, pt_index], min=0., max=1.0, epsilon=1.0e-4)
-    stacked_data[:, :, eta_index] = rescale(stacked_data[:, :, eta_index], min=-nnp.pi, max=nnp.pi, epsilon=0)
-    stacked_data[:, :, phi_index] = rescale(stacked_data[:, :, phi_index], min=-nnp.pi, max=nnp.pi, epsilon=0)
-    return nnp.split(stacked_data, data_len)[:-1]
-
-def rescale(data: np.ndarray, min: float = 0.0, max: float = 1.0, epsilon: float = 1.0e-4) -> np.ndarray:
-    """
-    Rescales the data to a specified range.
-
-    Args:
-        data (np.ndarray): Input data to rescale.
-        min (float): Minimum value of the scaled data.
-        max (float): Maximum value of the scaled data.
-        epsilon (float): Small offset to prevent numerical instability.
-
-    Returns:
-        np.ndarray: Rescaled data.
-    """
-    data_shape = data.shape
-    max-=epsilon
-    scaler = MinMaxScaler(feature_range=(min, max))
-    data_reshaped = data.flatten()[:, np.newaxis]
-    data_scaled = scaler.fit_transform(data_reshaped)
-    return data_scaled.reshape(data_shape[0], data_shape[1])
