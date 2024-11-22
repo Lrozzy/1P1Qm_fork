@@ -13,7 +13,7 @@ import numpy as nnp
 import torch
 from torch.utils.data import IterableDataset, DataLoader
 from typing import List, Tuple, Union
-
+import loguru
 eta_lims=ut.feature_limits['eta']
 phi_lims=ut.feature_limits['phi']
 class CASEDelphesJetDataset(IterableDataset):
@@ -36,7 +36,7 @@ class CASEDelphesJetDataset(IterableDataset):
     """
     def __init__(self, filelist:List[str]=None, batch_size:int=32, max_samples:int=5e4, data_key='jetConstituentsList',\
                  feature_key='eventFeatures',input_shape:tuple[int]=(10, 3),epsilon:float=1.0e-4,train:bool=True,yield_energies=False,\
-                    normalize_pt=False,use_subjet_PFCands=False):
+                    normalize_pt:bool=False,use_subjet_PFCands:bool=False,logger=None):
         super().__init__()
         self.filelist = sorted(filelist)
         self.batch_size = batch_size
@@ -48,13 +48,14 @@ class CASEDelphesJetDataset(IterableDataset):
         self.j2pt_index=ut.getIndex('event','j2Pt') # Bug fix
         self.mjj_index=ut.getIndex('event','mJJ')
         self.use_subjet_PFCands=use_subjet_PFCands
-        self.max_samples = 2*max_samples
+        self.max_samples = max_samples
         self.epsilon=epsilon
         self.data_key=data_key
         self.feature_key=feature_key
         self.train=train
         self.batch_counter=0
         self.normalize_pt=normalize_pt
+        self.logger=logger
         self.n_qubits=input_shape[0]
 
     def fixed_rescale(self,data: np.ndarray, epsilon: float = 1.0e-4, type='pt') -> np.ndarray:
@@ -72,10 +73,13 @@ class CASEDelphesJetDataset(IterableDataset):
         min=ut.feature_limits[type]['min']
         max=ut.feature_limits[type]['max']
         max-=epsilon
-        assumed_limits={'pt':[epsilon,3000.],'eta':[-0.8,0.8],'phi':[-0.8,0.8]}
+        assumed_limits=ut.assumed_limits
         if type not in ['pt','eta','phi']:
             raise NameError("Type must be either of [pt,eta,phi]")
-        print(f"Assuming fixed sample maxima: [{assumed_limits[type][0]},{assumed_limits[type][1]}] for variable {type}")
+        if self.logger is not None:
+            self.logger.info(f"Assuming fixed sample maxima: [{assumed_limits[type][0]},{assumed_limits[type][1]}] for variable {type}")
+        else:
+            print(f"Assuming fixed sample maxima: [{assumed_limits[type][0]},{assumed_limits[type][1]}] for variable {type}")
         data_shape = data.shape
         data_reshaped = data.flatten()
         data_scaled = ((data_reshaped - assumed_limits[type][0])/(assumed_limits[type][1]-assumed_limits[type][0]))*(max-min) + min # scale using fixed values of 
@@ -93,7 +97,7 @@ class CASEDelphesJetDataset(IterableDataset):
             np.ndarray: Stacked data from both jets.
             np.ndarray: Stacked truth labels.
         """
-        
+        self.max_samples=2*self.max_samples # to account for 2 jets per event
         with h5py.File(file_path, 'r') as file:
             # Read data of shape (N,2,100,3) where N is the number of events, 2 is the number of jets, 100 is the number of particles and 3 is the (eta,phi,pt) of each particle
             mjj=np.array(file[self.feature_key][:,self.mjj_index])
@@ -101,7 +105,10 @@ class CASEDelphesJetDataset(IterableDataset):
             j2pt=np.array(file[self.feature_key][:,self.j2pt_index])
 
             if self.use_subjet_PFCands:
-                print(f"Reading {self.n_qubits//2} PFCands from each subjet for a total of {self.n_qubits} PFCands per jet")
+                if self.logger is not None:
+                    self.logger.info(f"Reading {self.n_qubits//2} PFCands from each subjet for a total of {self.n_qubits} PFCands per jet")
+                else:
+                    print(f"Reading {self.n_qubits//2} PFCands from each subjet for a total of {self.n_qubits} PFCands per jet")
                 jet_etaphipt = np.array(file[self.data_key][()]) # because n_qubits is the number of particles
                 num_PFCands_subleading_jet=file['num_PFCands_subleading_jet'][()]
                 evt_subjet_idx=file['PFCand_subjet_idx'][()] # N x 2 x 100
@@ -109,7 +116,14 @@ class CASEDelphesJetDataset(IterableDataset):
                 pf_mask=evt_subjet_idx<mask_limit[...,None] # N x 2 x 100
                 jet_etaphipt=jet_etaphipt[pf_mask].reshape(-1,2,self.n_qubits,3) # N x 2 x n_qubits x 3
             else:
-                jet_etaphipt = np.array(file[self.data_key][:,:, :self.n_qubits, :]) # because n_qubits is the number of particles
+                if self.logger is not None:
+                    self.logger.info(f"Reading hardest {self.n_qubits} PFCands per jet")
+                else:
+                    print(f"Reading hardest {self.n_qubits} PFCands per jet")
+                jet_etaphipt = np.array(file[self.data_key][()]) # because n_qubits is the number of particles
+                sorted_indices = np.argsort(-jet_etaphipt[...,self.pt_index], axis=2)
+                jet_etaphipt = np.take_along_axis(jet_etaphipt, sorted_indices[...,None], axis=2)
+                jet_etaphipt = jet_etaphipt[:,:,:self.n_qubits,:]
             #jet1_energy=np.array(file[self.feature_key][:,self.j1E_index])
             #jet2_energy=np.array(file[self.feature_key][:,self.j2E_index])
             
@@ -139,7 +153,6 @@ class CASEDelphesJetDataset(IterableDataset):
         
         stacked_data = np.reshape(jet_etaphipt,newshape=[-1, jet_etaphipt.shape[2], jet_etaphipt.shape[3]])
         stacked_labels = np.concatenate([truth_label, truth_label], axis=0)
-        #stacked_energies = np.concatenate([jet1_energy, jet2_energy], axis=0)
         
         print("sample max pt: ",np.max(stacked_data[:,:,self.pt_index]))
         print("sample min pt: ",np.min(stacked_data[:,:,self.pt_index]))
@@ -168,11 +181,11 @@ class CASEDelphesJetDataset(IterableDataset):
     Notes:
         - This method halves the number of samples from `max_samples` to avoid double counting, because we wish to return 2 jets per event
     """
-        self.max_samples = self.max_samples//2
+        
+        print(f"Will read a total of {self.max_samples} events for inference")
         jetFeatures_array=[]
         while len(jetFeatures_array)<self.max_samples:
             for i,file_path in enumerate(self.filelist):
-                #import pdb;pdb.set_trace()
                 jet_etaphipt,jet_features,truth_label= self.load_and_preprocess_file(file_path,inference=True)
                 if i==0:
                     jetFeatures_array=jet_features
@@ -215,24 +228,17 @@ class CASEDelphesJetDataset(IterableDataset):
                 
                 batch_data = data[i:end]
                 batch_labels = labels[i:end]
-                #batch_jet_energy = jet_energy[i:end]
                 
-                # Convert data to PyTorch tensors before yielding
                 batch_data = torch.from_numpy(batch_data).float()
                 batch_labels = torch.from_numpy(batch_labels).float() # Assuming labels are floats
-                #batch_jet_energy = torch.from_numpy(batch_jet_energy).float()
                 
                 sample_counter += batch_data.shape[0]
-                #self.batch_counter+=1
-                #if self.train and self.yield_energies:
-                #    yield np.array(batch_data,requires_grad=False), np.array(batch_jet_energy,requires_grad=False)
                 if self.train:
                     yield np.array(batch_data,requires_grad=False)
                 else:
                     yield np.array(batch_data,requires_grad=False), np.array(batch_labels,requires_grad=False)
 
-def CASEDelphesDataLoader(filelist:List[str]=None,batch_size:int=128, input_shape:tuple[int]=(100, 3),\
-    train:bool=True,max_samples:int=5e4,normalize_pt:bool=False,use_subjet_PFCands:bool=False) -> DataLoader:
+def CASEDelphesDataLoader(input_shape:tuple[int]=(100, 3),train:bool=True,use_subjet_PFCands:bool=False,dataset='delphes',**kwargs) -> DataLoader:
     '''
     Wrapper function to create a DataLoader for the CASEDelphesJetDataset.
     Args:
@@ -247,18 +253,146 @@ def CASEDelphesDataLoader(filelist:List[str]=None,batch_size:int=128, input_shap
     if use_subjet_PFCands:
         print("Equally divided between 2 subjets per jet")
     
-    dataset = CASEDelphesJetDataset(filelist=filelist, batch_size=batch_size, input_shape=input_shape,train=train,\
-                                    max_samples=max_samples,normalize_pt=normalize_pt,use_subjet_PFCands=use_subjet_PFCands)
+    if dataset.casefold()=='delphes':
+        dset = CASEDelphesJetDataset(input_shape=input_shape,train=train,use_subjet_PFCands=use_subjet_PFCands,**kwargs)
+    elif dataset.casefold()=='jetclass':
+        dset = CASEJetClassDataset(input_shape=input_shape,train=train,use_subjet_PFCands=use_subjet_PFCands,**kwargs)
+    else:
+        raise NameError("Dataset type must be either delphes or jetclass")
+    return DataLoader(dset, batch_size=None)  # None for batch_size since batching is managed by the dataset
+
+
+
+class CASEJetClassDataset(CASEDelphesJetDataset):
+    def __init__(self,feature_key='jetFeatures',**kwargs):
+        super().__init__(feature_key=feature_key,**kwargs)
+        self.jpt_index=ut.getIndex('jet','jet_pt')
+        self.j_msd_index=ut.getIndex('jet','jet_sdmass')
+    def load_and_preprocess_file(self, file_path:str,inference:bool=False):
+        """
+        Loads and preprocesses a single .h5 file.
+
+        Args:
+            file_path (str): Path to the .h5 file.
+            inference (bool): Whether the data is being loaded for inference.
+
+        Returns:
+            np.ndarray: Stacked data from a jet.
+            np.ndarray: Stacked truth labels.
+        """
+        with h5py.File(file_path, 'r') as file:
+            # Read data of shape (N,2,100,3) where N is the number of events, 2 is the number of jets, 100 is the number of particles and 3 is the (eta,phi,pt) of each particle
+            msd=np.array(file[self.feature_key][:,self.j_msd_index])
+            jet_pt=np.array(file[self.feature_key][:,self.jpt_index])
+            
+            if self.use_subjet_PFCands:
+                if self.logger is not None:
+                    self.logger.info(f"Reading {self.n_qubits//2} PFCands from each subjet for a total of {self.n_qubits} PFCands per jet")
+                else:
+                    print(f"Reading {self.n_qubits//2} PFCands from each subjet for a total of {self.n_qubits} PFCands per jet")
+                jet_etaphipt = np.array(file[self.data_key][()]) # because n_qubits is the number of particles
+                num_PFCands_subleading_jet=file['num_PFCands_subleading_jet'][()]
+                evt_subjet_idx=file['PFCand_subjet_idx'][()] # N x 100
+                mask_limit=np.where(num_PFCands_subleading_jet>self.n_qubits//2,self.n_qubits//2,self.n_qubits-num_PFCands_subleading_jet) # N x 1
+                pf_mask=evt_subjet_idx<mask_limit # N x 100
+                # In some cases, this results in less than n_qubits particles per jet, since the leading subjet has less than n_qubits/2 particles
+                # We need to get rid of these events for now
+                extra_mask=np.sum(pf_mask,axis=1)==self.n_qubits
+                jet_etaphipt=jet_etaphipt[extra_mask] # N x n_qubits x 3 
+                pf_mask=pf_mask[extra_mask]
+                jet_etaphipt=jet_etaphipt[pf_mask].reshape(-1,self.n_qubits,3) # N x 2 x n_qubits x 3
+            else:
+                if self.logger is not None:
+                    self.logger.info(f"Reading hardest {self.n_qubits} PFCands per jet")
+                else:
+                    print(f"Reading hardest {self.n_qubits} PFCands per jet")
+                jet_etaphipt = np.array(file[self.data_key][()]) # because n_qubits is the number of particles
+                sorted_indices = np.argsort(-jet_etaphipt[...,self.pt_index], axis=2)
+                jet_etaphipt = np.take_along_axis(jet_etaphipt, sorted_indices[...,None], axis=2)
+                jet_etaphipt = jet_etaphipt[:,:,:self.n_qubits,:]
+            
+            try:
+                truth_label = np.array(file['truth_label'][()])
+            except:
+                if 'zjetsto'.casefold() in file_path.casefold(): # case-insensitive search
+                    truth_label = np.zeros(jet_etaphipt.shape[0])
+                    print("Inferred: QCD like jets")
+                else:
+                    truth_label = np.ones(jet_etaphipt.shape[0])
+        if self.normalize_pt:
+            print("Normalizing PFCand pT by jet pT")
+            jet_etaphipt[...,self.pt_index]=jet_etaphipt[...,self.pt_index]/jet_pt[:,np.newaxis]
+        else:
+            jet_etaphipt[...,self.pt_index]=self.fixed_rescale(jet_etaphipt[...,self.pt_index], epsilon=self.epsilon,type='pt')
+        
+        jet_etaphipt[...,self.eta_index]=self.fixed_rescale(jet_etaphipt[...,self.eta_index], epsilon=self.epsilon,type='eta')
+        jet_etaphipt[...,self.phi_index]=self.fixed_rescale(jet_etaphipt[...,self.phi_index], epsilon=self.epsilon,type='phi')
+            
+        # If you only wish to test, then no need to batch, just return the entire array
+        
+        stacked_data = np.reshape(jet_etaphipt,newshape=[-1, jet_etaphipt.shape[2], jet_etaphipt.shape[3]])
+        stacked_labels = np.concatenate([truth_label, truth_label], axis=0)
+        
+        print("sample max pt: ",np.max(stacked_data[:,:,self.pt_index]))
+        print("sample min pt: ",np.min(stacked_data[:,:,self.pt_index]))
+        print("sample max eta: ",np.max(stacked_data[:,:,self.eta_index]))
+        print("sample min eta: ",np.min(stacked_data[:,:,self.eta_index]))
+        print("sample max phi: ",np.max(stacked_data[:,:,self.phi_index]))
+        print("sample min phi: ",np.min(stacked_data[:,:,self.phi_index]))
+        return stacked_data, stacked_labels#,stacked_energies
     
-    return DataLoader(dataset, batch_size=None)  # None for batch_size since batching is managed by the dataset
+        
 
+def select_subjet_constituents(num_PFCands_subleading_jet, evt_subjet_idx, jet_etaphipt, n_qubits=8,selection='equal'):
+    """
+    Selects a fixed number of particles per jet, filling with random sampling if needed.
 
+    Parameters:
+    - num_PFCands_subleading_jet: (N,) array representing number of particles in the lower pT subjet.
+    - evt_subjet_idx: (N, 100) array containing indices of particles assigned to subjets.
+    - jet_etaphipt: (N, 100, 3) array representing momenta (eta, phi, pT) of particles.
+    - n_qubits: Desired number of particles per jet (default is 8).
 
+    Returns:
+    - jet_etaphipt_selected: (N, n_qubits, 3) array of selected particles per jet.
+    """
+    N = jet_etaphipt.shape[0]  # Number of jets
 
+    # Step 1: Create mask limit to determine how many particles can be selected from each subjet
+    if selection=='random':
+        mask_limit = 4*np.ones([N,1])#np.where(num_PFCands_subleading_jet > n_qubits // 2, n_qubits // 2, n_qubits - num_PFCands_subleading_jet)  # (N,)
+    elif selection=='equal':
+        mask_limit = np.where(num_PFCands_subleading_jet > n_qubits // 2, n_qubits // 2, n_qubits - num_PFCands_subleading_jet)  # (N,)
+    else:
+        raise NameError("Selection must be either random or equal")
+    # Step 2: Create a mask to select particles from each jet
+    
+    pf_mask = evt_subjet_idx < mask_limit  # (N, 100)
+        
+    # Step 3: Ensure each jet has exactly n_qubits particles
+    selected_particles = []
+    print("It is now necessary to run an event loop in python")
+    print("My sincere apologies")
+    import time;time.sleep(3)
+    for i in range(N):
+        jet_particles = jet_etaphipt[i]  # (100, 3)
+        mask = pf_mask[i]  # (100,)
+        selected = jet_particles[mask]  # Select particles based on mask
 
+        if len(selected) < n_qubits:
+            # Randomly sample additional particles to reach n_qubits
+            non_padded_indices = np.where(evt_subjet_idx[i] != 999)[0]  # Indices of non-padded particles
+            num_additional = n_qubits - len(selected)
+            additional_indices = np.random.choice(non_padded_indices, size=num_additional, replace=False)
+            additional_particles = jet_particles[additional_indices]
+            selected = np.vstack((selected, additional_particles))
 
+        selected_particles.append(selected)
 
+    # Step 4: Convert the list to a numpy array of shape (N, n_qubits, 3)
+    jet_etaphipt_selected = np.array(selected_particles)  # (N, n_qubits, 3)
 
+    return jet_etaphipt_selected
 
 
 

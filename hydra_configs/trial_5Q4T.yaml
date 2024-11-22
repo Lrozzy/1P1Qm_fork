@@ -1,0 +1,33 @@
+defaults:
+  - base
+
+seed: 'trial_5Q4T'
+train: true
+wires: 5
+trash_qubits: 4
+shots: 2500
+train_n: 2500
+valid_n: 500
+batch_size: 100
+epochs: 40
+backend: 'autograd'
+device_name: 'lightning.kokkos'
+lr: 0.005
+save: true
+flat: true
+evictable: false
+separate_ancilla: false
+resume: false
+desc: 'Training run to test hydra config'
+norm_pt: true
+dataset: 'delphes'
+substructure: false
+use_reuploading: false
+loss: 'semiclassical'
+save_dir: '/work/abal/qae_hep/saved_models/'
+data_dir: '/ceph/abal/QML/delphes/substructure/CA_decluster/'
+dump: '/ceph/abal/QML/delphes/dumps/' # only for testing
+read_n: 2000 # only for testing
+load: false # only for testing
+scheme: 'min' # only for testing
+log_wandb: false # only for testing
