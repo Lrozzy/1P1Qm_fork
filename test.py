@@ -46,12 +46,12 @@ def main(cfg: DictConfig):
         qc_spec = importlib.util.spec_from_file_location('qc', os.path.join(save_dir, 'FROZEN_ARCHITECTURE.py'))
         qc = importlib.util.module_from_spec(qc_spec)
         qc_spec.loader.exec_module(qc)
+        import case_reader as cr
+        #cr_spec = importlib.util.spec_from_file_location('cr', os.path.join(save_dir, 'FROZEN_DATAREADER.py'))
+        #cr = importlib.util.module_from_spec(cr_spec)
+        #cr_spec.loader.exec_module(cr)
         
-        cr_spec = importlib.util.spec_from_file_location('cr', os.path.join(save_dir, 'FROZEN_DATAREADER.py'))
-        cr = importlib.util.module_from_spec(cr_spec)
-        cr_spec.loader.exec_module(cr)
-        
-        print("Successfully imported frozen architecture and dataloaders")
+        #print("Successfully imported frozen architecture and dataloaders")
     except ImportError:
         import quantum.architectures as qc
         print("Failure: Frozen architecture not imported. Fetching generic architecture instead")
@@ -83,26 +83,44 @@ def main(cfg: DictConfig):
         print(f"Successfully loaded model at {model_path}")
 
     # Load test data
-    paths = ps.PathSetter(data_path='/ceph/abal/QML/delphes/substructure/CA_decluster')
-    qcd_files = sorted(glob.glob(paths.get_data_path('QCD_SR_test') + '/*.h5'))
+    paths = ps.PathSetter(data_path=cfg.data_dir)
     sig_files = sorted(glob.glob(paths.get_data_path(cfg.signal) + '/*.h5'))
-
-    qcd_dataset=cr.CASEDelphesJetDataset(
-        filelist=qcd_files,
-        input_shape=(len(qc.auto_wires), 3),
-        normalize_pt=norm_pt,
-        max_samples=cfg.read_n,
-        use_subjet_PFCands=cfg.substructure
-    )
-    sig_dataset=cr.CASEDelphesJetDataset(
-        filelist=sig_files,
-        input_shape=(len(qc.auto_wires), 3),
-        normalize_pt=norm_pt,
-        max_samples=cfg.read_n,
-        use_subjet_PFCands=cfg.substructure
-    )
-    qcd_dataset.set_dataset_type(cfg.dataset)
-    sig_dataset.set_dataset_type(cfg.dataset)
+    if cfg.dataset.casefold()=='delphes':
+        qcd_files = sorted(glob.glob(paths.get_data_path('QCD_SR_test') + '/*.h5'))
+        qcd_dataset=cr.CASEDelphesJetDataset(
+            filelist=qcd_files,
+            input_shape=(len(qc.auto_wires), 3),
+            normalize_pt=norm_pt,
+            max_samples=cfg.read_n,
+            use_subjet_PFCands=cfg.substructure
+        )
+        sig_dataset=cr.CASEDelphesJetDataset(
+            filelist=sig_files,
+            input_shape=(len(qc.auto_wires), 3),
+            normalize_pt=norm_pt,
+            max_samples=cfg.read_n,
+            use_subjet_PFCands=cfg.substructure
+        )
+    elif cfg.dataset.casefold()=='jetclass': 
+        qcd_files=sorted(glob.glob(paths.get_data_path('ZJetsToNuNu_val') + '/*.h5'))
+        qcd_dataset=cr.CASEJetClassDataset(
+            filelist=qcd_files,
+            input_shape=(len(qc.auto_wires), 3),
+            normalize_pt=norm_pt,
+            max_samples=cfg.read_n,
+            use_subjet_PFCands=cfg.substructure,selection=cfg.PFCand_selection_type
+        )
+        sig_dataset=cr.CASEJetClassDataset(
+            filelist=sig_files,
+            input_shape=(len(qc.auto_wires), 3),
+            normalize_pt=norm_pt,
+            max_samples=cfg.read_n,
+            use_subjet_PFCands=cfg.substructure,selection=cfg.PFCand_selection_type
+        )
+    else:
+        raise NameError(f"Dataset {cfg.dataset} not recognized. Must be either delphes or jetclass")
+    
+    
 
     if cfg.load:
         qcd_fids_j1=nnp.load(os.path.join(dump_dir,'qcd_fids_j1.npy'))

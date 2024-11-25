@@ -118,9 +118,15 @@ def main(cfg: DictConfig):
         f.write(repr(cfg))
 
     # Load the data and create a dataloader
-    data_key = 'QCD_flat_pt' if cfg.flat else 'QCD_train'
-    val_key = 'QCD_test'
-
+    if cfg.dataset.casefold()=='jetclass':
+        data_key='ZJetsToNuNu_flat' if cfg.flat else 'ZJetsToNuNu_train'
+        val_key='ZJetsToNuNu_test'
+    elif cfg.dataset.casefold()=='delphes':
+        data_key = 'QCD_flat_pt' if cfg.flat else 'QCD_train'
+        val_key = 'QCD_test'
+    else:
+        raise NameError(f"Dataset {cfg.dataset} not recognized, must be either jetclass or delphes")
+    
     logger.info(f'loading data from {ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key)}')
     train_filelist = sorted(glob.glob(os.path.join(ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key), '*.h5')))
     val_filelist = sorted(glob.glob(os.path.join(ps.PathSetter(data_path=cfg.data_dir).get_data_path(val_key), '*.h5')))
@@ -132,9 +138,11 @@ def main(cfg: DictConfig):
     logger.info(f"Validating on {len(val_filelist)} files found at {ps.PathSetter(data_path=cfg.data_dir).get_data_path(val_key)}")
 
     train_loader = cr.OneP1QDataLoader(filelist=train_filelist, batch_size=cfg.batch_size, input_shape=(len(qc.auto_wires), 3), train=True,
-                                            max_samples=train_max_n, normalize_pt=cfg.norm_pt, use_subjet_PFCands=cfg.substructure,logger=logger,dataset=cfg.dataset)
+                                            max_samples=train_max_n, normalize_pt=cfg.norm_pt, \
+                                                use_subjet_PFCands=cfg.substructure,logger=logger,dataset=cfg.dataset,selection=cfg.PFCand_selection_type)
     val_loader = cr.OneP1QDataLoader(filelist=val_filelist, batch_size=cfg.batch_size, input_shape=(len(qc.auto_wires), 3), train=False,
-                                          max_samples=valid_max_n, normalize_pt=cfg.norm_pt, use_subjet_PFCands=cfg.substructure,dataset=cfg.dataset)
+                                          max_samples=valid_max_n, normalize_pt=cfg.norm_pt, \
+                                            use_subjet_PFCands=cfg.substructure,dataset=cfg.dataset,selection=cfg.PFCand_selection_type)
 
     # Initialize the optimizer
     optimizer = qc.qml.AdamOptimizer(stepsize=cfg.lr)
