@@ -244,8 +244,7 @@ def main(cfg: DictConfig):
 
     fpr,tpr,thresholds=roc_curve(labels,costs)
     roc_auc=roc_auc_score(labels,costs)
-
-
+    
     bins_qcd,edges_qcd=nnp.histogram(qcd_fids,density=True,bins=25,range=[90,100])
     bins_sig,edges_sig=nnp.histogram(sig_fids,density=True,bins=25,range=[90,100])
     plt.stairs(bins_qcd,edges_qcd,fill=True,label='QCD',alpha=0.6)
@@ -271,25 +270,27 @@ def main(cfg: DictConfig):
     plt.savefig(os.path.join(plot_dir,f'roc_curve_{cfg.signal}.png'))
 
     plt.clf()
-    effs=nnp.arange(10,100,0.5)
-    sig_cuts=nnp.percentile(sig_costs,effs)
-    sig_cuts,idx=nnp.unique(sig_cuts,return_index=True)
-    effs=effs[idx]
-    significance=[]
-    plot_eff=[]
-
-    for cut in sig_cuts:
-        sig_eff=nnp.sum(sig_costs>=cut)/sig_costs.shape[0]
-        qcd_eff=nnp.sum(qcd_costs>=cut)/qcd_costs.shape[0]
-        if sig_eff<0.15: continue
-        if qcd_eff>0:
-            plot_eff.append(sig_eff)
-            significance.append(sig_eff/nnp.sqrt(qcd_eff))
-    sig_cuts=nnp.percentile(sig_costs,effs)
-
-    plt.plot(plot_eff,significance)
+    # effs=nnp.arange(10,100,0.5)
+    # sig_cuts=nnp.percentile(sig_costs,effs)
+    # sig_cuts,idx=nnp.unique(sig_cuts,return_index=True)
+    # effs=effs[idx]
+    # significance=[]
+    # plot_eff=[]
+    sic=tpr/np.sqrt(fpr)
+    
+    # for cut in sig_cuts:
+    #     sig_eff=nnp.sum(sig_costs>=cut)/sig_costs.shape[0]
+    #     qcd_eff=nnp.sum(qcd_costs>=cut)/qcd_costs.shape[0]
+    #     if sig_eff<0.15: continue
+    #     if qcd_eff>0:
+    #         plot_eff.append(sig_eff)
+    #         significance.append(sig_eff/nnp.sqrt(qcd_eff))
+    # sig_cuts=nnp.percentile(sig_costs,effs)
+    
+    #plt.plot(plot_eff,significance)
+    plt.plot(tpr,sic)
     plt.minorticks_on()
-    plt.grid(True,which='major',linestyle='--')
+    #plt.grid(True,which='major',linestyle='--')
     plt.xlabel('Signal efficiency')
     plt.ylabel('Significance Improvement')
     plt.xlim(0.1,1)
@@ -299,8 +300,7 @@ def main(cfg: DictConfig):
     if log_wandb:
         for filename in glob.glob(os.path.join(plot_dir, "*.png")):
             wandb.log({os.path.split(filename)[-1].replace('*.png',''): wandb.Image(filename)})
-
-# Finish WandB run
-    wandb.finish()
+    # Finish WandB run
+        wandb.finish()
 if __name__ == "__main__":
     main()

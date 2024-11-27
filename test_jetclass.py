@@ -47,12 +47,11 @@ def main(cfg: DictConfig):
         qc_spec = importlib.util.spec_from_file_location('qc', os.path.join(save_dir, 'FROZEN_ARCHITECTURE.py'))
         qc = importlib.util.module_from_spec(qc_spec)
         qc_spec.loader.exec_module(qc)
-        import case_reader as cr
-        #cr_spec = importlib.util.spec_from_file_location('cr', os.path.join(save_dir, 'FROZEN_DATAREADER.py'))
-        #cr = importlib.util.module_from_spec(cr_spec)
-        #cr_spec.loader.exec_module(cr)
-        
-        #print("Successfully imported frozen architecture and dataloaders")
+        #import case_reader as cr
+        cr_spec = importlib.util.spec_from_file_location('cr', os.path.join(save_dir, 'FROZEN_DATAREADER.py'))
+        cr = importlib.util.module_from_spec(cr_spec)
+        cr_spec.loader.exec_module(cr)
+        print("Successfully imported frozen architecture and dataloaders")
     except ImportError:
         import quantum.architectures as qc
         print("Failure: Frozen architecture not imported. Fetching generic architecture instead")
@@ -177,7 +176,7 @@ def main(cfg: DictConfig):
 
     plt.xlabel(r'Quantum Fidelity (%): $\langle T|R \rangle$')
     plt.ylabel('No. of events')
-    #plt.yscale('log')
+    plt.yscale('log')
     plt.legend(loc='upper left')
     plt.savefig(os.path.join(plot_dir,f'fidelity_hist_{cfg.signal}.png'))
 
@@ -191,27 +190,10 @@ def main(cfg: DictConfig):
     #plt.grid(True,which='major',linestyle='--')
     plt.legend(loc='lower right')
     plt.savefig(os.path.join(plot_dir,f'roc_curve_{cfg.signal}.png'))
-
     plt.clf()
-    effs=nnp.arange(10,100,0.5)
-    sig_cuts=nnp.percentile(sig_costs,effs)
-    sig_cuts,idx=nnp.unique(sig_cuts,return_index=True)
-    effs=effs[idx]
-    significance=[]
-    plot_eff=[]
-
-    for cut in sig_cuts:
-        sig_eff=nnp.sum(sig_costs>=cut)/sig_costs.shape[0]
-        qcd_eff=nnp.sum(qcd_costs>=cut)/qcd_costs.shape[0]
-        if sig_eff<0.15: continue
-        if qcd_eff>0:
-            plot_eff.append(sig_eff)
-            significance.append(sig_eff/nnp.sqrt(qcd_eff))
-    sig_cuts=nnp.percentile(sig_costs,effs)
-
-    plt.plot(plot_eff,significance)
-    plt.minorticks_on()
-    #plt.grid(True,which='major',linestyle='--')
+    
+    sic=tpr/np.sqrt(fpr)
+    plt.plot(tpr,sic)
     plt.xlabel('Signal efficiency')
     plt.ylabel('Significance Improvement')
     plt.xlim(0.1,1)
