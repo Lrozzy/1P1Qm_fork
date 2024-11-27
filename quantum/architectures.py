@@ -156,14 +156,15 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         qml.RY(radius*zenith, wires=w)   
         qml.RZ(radius*azimuth, wires=w)  
     # QAE Circuit
-    for item in subjet_comb_wires:
-        qml.CNOT(wires=item)
     
     for phi,theta,omega,i in zip(weights[:N],weights[N:2*N],weights[2*N:3*N],auto_wires):
         qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
     
-    for item in two_comb_wires: 
+    for item in subjet_comb_wires:
         qml.CNOT(wires=item)
+    
+    # for item in two_comb_wires: 
+    #     qml.CNOT(wires=item)
     
     # Layer 2
     for w in auto_wires:
@@ -179,14 +180,14 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
     # for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
     #     qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
     
-    for item in two_comb_wires:
-        #qml.CNOT(wires=item)
-        w=item[1] 
-        zenith = inputs[:,w, index['eta']] # corresponding to eta
-        azimuth = inputs[:,w, index['phi']] # corresponding to phi
-        radius = inputs[:,w, index['pt']] # corresponding to pt
-        qml.CRY(radius*zenith,wires=item)
-        qml.CRZ(radius*azimuth,wires=item)
+    # for item in two_comb_wires:
+    #     #qml.CNOT(wires=item)
+    #     w=item[1] 
+    #     zenith = inputs[:,w, index['eta']] # corresponding to eta
+    #     azimuth = inputs[:,w, index['phi']] # corresponding to phi
+    #     radius = inputs[:,w, index['pt']] # corresponding to pt
+    #     qml.CRY(radius*zenith,wires=item)
+    #     qml.CRZ(radius*azimuth,wires=item)
 
     for item in subjet_comb_wires:
         #qml.CNOT(wires=item)
@@ -194,11 +195,14 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         zenith = inputs[:,w, index['eta']] # corresponding to eta
         azimuth = inputs[:,w, index['phi']] # corresponding to phi
         radius = inputs[:,w, index['pt']] # corresponding to pt
-        qml.CRY(radius*zenith,wires=item)
-        qml.CRZ(radius*azimuth,wires=item)
+        qml.CRY(radius,wires=item)
+        qml.CRZ(radius,wires=item)
 
-    for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
-        qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+    # for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
+    #     qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+    
+    for item in two_comb_wires: 
+        qml.CNOT(wires=item)
     
     # FIXED: handle the case where ancillary_wires is an integer, which is the case when separate_ancilla is False
     if len(ancillary_wires)==1:
@@ -210,6 +214,7 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         qml.Hadamard(ancilla)
         qml.CSWAP(wires=[ancilla, ref_wire, trash_wire])
         qml.Hadamard(ancilla)
+    
     return qml.expval(qml.operation.Tensor(*[qml.PauliZ(i) for i in ancillary_wires]))
     #import pdb;pdb.set_trace()
     #fidelities = [qml.PauliZ(i) for i in ancillary_wires]
@@ -318,8 +323,8 @@ class QuantumTrainer():
         self.init_weights=kwargs['init_weights']
         self.batch_size=kwargs['batch_size'] or 1000
         self.logger=kwargs['logger']
-        self.train_max_n=2*train_max_n
-        self.valid_max_n=2*valid_max_n
+        self.train_max_n=train_max_n
+        self.valid_max_n=valid_max_n
         self.epochs=epochs
         self.patience=patience
         self.saving=save
