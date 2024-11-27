@@ -55,6 +55,10 @@ path_dict:dict[str:str]={'QCD_train':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideban
         'HToCC': 'train/HToCC/',
         'HToBB': 'train/HToBB/',
         'WToQQ': 'train/WToQQ/',
+        'TTBarLep': 'train/TTBarLep/',
+        'TTBar': 'train/TTBar_/',
+        'HToGG': 'train/HToGG/',
+        'ZToQQ': 'train/ZToQQ/'
            }
 
 eventFeatureNames:list[str]=['mJJ', 'j1Pt', 'j1Eta', 'j1Phi', 'j1M', 'j1E', 'j2Pt',
@@ -65,4 +69,7 @@ particleFeatureNames:list[str]=['eta', 'phi', 'pt']
 labels={'grav_1p5_narrow':'$M_{grav}=1.5$ TeV','grav_2p5_narrow':'$M_{grav}=2.5$ TeV','grav_3p5_narrow':'$M_{grav}=3.5$ TeV'\
         ,'grav_4p5_narrow':'$M_{grav}=4.5$ TeV','AtoHZ_1p5':'$M_{A}=1.5$ TeV','AtoHZ_2p5':'$M_{A}=2.5$ TeV',\
             'AtoHZ_3p5':'$M_{A}=3.5$ TeV','AtoHZ_4p5':'$M_{A}=4.5$ TeV','ZJetsToNuNu':'q/g jets','HToCC':r'$H \rightarrow c \overline{c}$',\
-                'HToBB':r'$H \rightarrow b \overline{b}$','WToQQ':r'W \rightarrow q \overline{q}$'}
+                'HToBB':r'$H \rightarrow b \overline{b}$',\
+                    'WToQQ':r'$W \rightarrow q \overline{q}$','TTBarLep':r'$t \rightarrow b l \nu$',\
+                        'HToGG':r'$H \rightarrow gg$','TTBar':r'$t \rightarrow bq \overline{q}$',\
+                            'ZToQQ':r'$Z \rightarrow q \overline{q}$'}
