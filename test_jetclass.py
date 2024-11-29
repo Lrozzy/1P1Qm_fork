@@ -192,7 +192,7 @@ def main(cfg: DictConfig):
     plt.savefig(os.path.join(plot_dir,f'roc_curve_{cfg.signal}.png'))
     plt.clf()
     
-    sic=tpr/np.sqrt(fpr)
+    sic=tpr/nnp.sqrt(fpr)
     plt.plot(tpr,sic)
     plt.xlabel('Signal efficiency')
     plt.ylabel('Significance Improvement')
