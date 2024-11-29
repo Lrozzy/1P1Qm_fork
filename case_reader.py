@@ -57,7 +57,8 @@ class CASEDelphesJetDataset(IterableDataset):
         self.normalize_pt=normalize_pt
         self.logger=logger
         self.n_qubits=input_shape[0]
-
+        self.rng = np.random.default_rng(seed=None)
+        # fresh entropy is pulled --> but only once for each instance of the dataloader. 
     def fixed_rescale(self,data: np.ndarray, epsilon: float = 1.0e-4, type='pt') -> np.ndarray:
         """
         Rescales the data to a specified range. Instead of using the min/max values of the data array,
@@ -213,7 +214,8 @@ class CASEDelphesJetDataset(IterableDataset):
             # Shuffle the data from this file only if training on a per-jet basis, otherwise it becomes necessary to preserve the order of jets
             
             indices = np.arange(data.shape[0])
-            np.random.shuffle(indices); print("Loaded data was shuffled")
+            self.rng.shuffle(indices)
+            print("Loaded data was shuffled")
             data = data[indices]
             labels = labels[indices]
             
