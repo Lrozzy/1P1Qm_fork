@@ -2,7 +2,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import os
 import pathlib
-import glob
+import glob,h5py
 
 # Other imports
 import quantum.losses as loss
@@ -23,7 +23,8 @@ def main(cfg: DictConfig):
 
     # Set up directories
     save_dir = os.path.join(cfg.save_dir, cfg.seed)
-    dump_dir = os.path.join(cfg.dump, cfg.seed)
+    dump_dir=cfg.dump
+    out_dir = os.path.join(cfg.dump, cfg.seed)
     plot_dir = os.path.join(save_dir, 'plots')
     hist_dir = os.path.join(plot_dir, 'jet_histograms')
 
@@ -121,16 +122,20 @@ def main(cfg: DictConfig):
         raise NameError(f"Dataset {cfg.dataset} not recognized. Must be either delphes or jetclass")
     
     
-
+    
     if cfg.load:
-        qcd_fids=nnp.load(os.path.join(dump_dir,'qcd_fids.npy'))
-        sig_fids=nnp.load(os.path.join(dump_dir,cfg.signal,'sig_fids.npy'))
-        qcd_costs=nnp.load(os.path.join(dump_dir,'qcd_costs.npy'))
-        sig_costs=nnp.load(os.path.join(dump_dir,cfg.signal,'sig_costs.npy'))
-        qcd_features=nnp.load(os.path.join(dump_dir,'qcd_features.npy'))
-        sig_features=nnp.load(os.path.join(dump_dir,cfg.signal,'sig_features.npy'))
-        qcd_labels=nnp.zeros(qcd_fids.shape[0])
-        sig_labels=nnp.ones(sig_fids.shape[0])
+        with h5py.File(os.path.join(dump_dir, 'qcd_results.h5'), 'r') as f:
+            qcd_fids = f['fids'][()]
+            qcd_costs = f['costs'][()]
+            qcd_features = f['jetFeatures'][()]
+            qcd_labels = f['truth_label'][()]
+            qcd_etaphipt = f['jetConstituentsList'][()]
+        with h5py.File(os.path.join(out_dir, cfg.signal, 'sig_results.h5'), 'r') as f:
+            sig_fids = f['fids'][()]
+            sig_costs = f['costs'][()]
+            sig_features = f['jetFeatures'][()]
+            sig_labels = f['truth_label'][()]
+            sig_etaphipt = f['jetConstituentsList'][()]
     # Inference
     else:
         qcd_etaphipt, qcd_features, qcd_labels = qcd_dataset.load_for_inference()
@@ -140,14 +145,21 @@ def main(cfg: DictConfig):
         sig_costs, sig_fids = qAE.run_inference(sig_etaphipt, loss_fn=cost_fn)
         
         # Save results
-        pathlib.Path(os.path.join(dump_dir, cfg.signal)).mkdir(parents=True, exist_ok=True)
-        nnp.save(os.path.join(dump_dir, 'qcd_fids.npy'), qcd_fids)
-        nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_fids.npy'), sig_fids)
-        nnp.save(os.path.join(dump_dir, 'qcd_costs.npy'), qcd_costs)
-        nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_costs.npy'), sig_costs)
-        nnp.save(os.path.join(dump_dir, 'qcd_features.npy'), qcd_features)
-        nnp.save(os.path.join(dump_dir, cfg.signal, 'sig_features.npy'), sig_features)
-
+        
+        pathlib.Path(os.path.join(out_dir, cfg.signal)).mkdir(parents=True, exist_ok=True)
+        with h5py.File(os.path.join(out_dir, 'qcd_results.h5'), 'w') as f:
+            f.create_dataset('jetConstituentsList', data=qcd_etaphipt)
+            f.create_dataset('jetFeatures', data=qcd_features)
+            f.create_dataset('fids', data=qcd_fids)
+            f.create_dataset('costs', data=qcd_costs)
+            f.create_dataset('truth_label', data=qcd_labels)
+        with h5py.File(os.path.join(out_dir, cfg.signal, 'sig_results.h5'), 'w') as f:
+            f.create_dataset('jetConstituentsList', data=sig_etaphipt)
+            f.create_dataset('jetFeatures', data=sig_features)
+            f.create_dataset('fids', data=sig_fids)
+            f.create_dataset('costs', data=sig_costs)
+            f.create_dataset('truth_label', data=sig_labels)
+ 
     qcd_fids=qcd_fids
     sig_fids=sig_fids
     qcd_costs=qcd_costs
@@ -167,8 +179,8 @@ def main(cfg: DictConfig):
     roc_auc=roc_auc_score(labels,costs)
 
 
-    bins_qcd,edges_qcd=nnp.histogram(qcd_fids,density=True,bins=25,range=[90,100])
-    bins_sig,edges_sig=nnp.histogram(sig_fids,density=True,bins=25,range=[90,100])
+    bins_qcd,edges_qcd=nnp.histogram(qcd_fids,density=True,bins=400,range=[0,100])
+    bins_sig,edges_sig=nnp.histogram(sig_fids,density=True,bins=400,range=[0,100])
     plt.stairs(bins_qcd,edges_qcd,fill=True,label='q/g jets',alpha=0.6)
     plt.stairs(bins_sig,edges_sig,fill=False,label=ps.labels[cfg.signal])
     plt.minorticks_on()
@@ -176,7 +188,7 @@ def main(cfg: DictConfig):
 
     plt.xlabel(r'Quantum Fidelity (%): $\langle T|R \rangle$')
     plt.ylabel('No. of events')
-    plt.yscale('log')
+    #plt.yscale('log')
     plt.legend(loc='upper left')
     plt.savefig(os.path.join(plot_dir,f'fidelity_hist_{cfg.signal}.png'))
 
