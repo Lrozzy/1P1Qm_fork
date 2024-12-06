@@ -110,13 +110,15 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
         qml.RY(radius * zenith, wires=w)   
         qml.RZ(radius * azimuth, wires=w)  
     # QAE Circuit
-    for item in two_comb_wires: 
-        qml.CNOT(wires=item)
 
     for phi,theta,omega,i in zip(weights[:N],weights[N:2*N],weights[2*N:],auto_wires):
         qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
 
+    for item in two_comb_wires: 
+        qml.CNOT(wires=item)
+    
     # FIXED: handle the case where ancillary_wires is an integer, which is the case when separate_ancilla is False
+    
     if len(ancillary_wires)==1:
         ancillary_wirelist=ancillary_wires*len(ref_wires)
     else:
@@ -151,59 +153,40 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         
         zenith = inputs[:,w, index['eta']] # corresponding to eta
         azimuth = inputs[:,w, index['phi']] # corresponding to phi
-        radius = inputs[:,w, index['pt']] # corresponding to pt
+        #radius = inputs[:,w, index['pt']] # corresponding to pt
         # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
-        qml.RY(radius*zenith, wires=w)   
-        qml.RZ(radius*azimuth, wires=w)  
+        qml.RY(zenith, wires=w)   
+        qml.RZ(azimuth, wires=w)  
+        #qml.RX(radius, wires=w)   
+        
     # QAE Circuit
+    # for item in subjet_comb_wires:
+    #     rwire=item[1] # harder subjet constituent
+    #     zenith = inputs[:,rwire, index['eta']] # corresponding to eta
+    #     azimuth = inputs[:,rwire, index['phi']] # corresponding to phi
+    #     qml.CRY(zenith,wires=item)    
+    #     qml.CRZ(azimuth,wires=item)    
     
-    for phi,theta,omega,i in zip(weights[:N],weights[N:2*N],weights[2*N:3*N],auto_wires):
-        qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
-    
-    for item in subjet_comb_wires:
+    for item in two_comb_wires:
         qml.CNOT(wires=item)
     
-    # for item in two_comb_wires: 
-    #     qml.CNOT(wires=item)
-    
+    for phi,theta,i in zip(weights[:N],weights[N:2*N],auto_wires):
+        qml.RY(phi,wires=i)
+        qml.RZ(theta,wires=i)
+
     # Layer 2
     for w in auto_wires:
         # Variables named according to spherical coordinate system, it's easier to understand :)    
         radius = inputs[:,w, index['pt']] # corresponding to pt
-        azimuth = inputs[:,w, index['phi']] # corresponding to phi
-        radius = inputs[:,w, index['pt']] # corresponding to pt
         # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
-        qml.RY(radius*zenith, wires=w)   
-        qml.RZ(radius*azimuth, wires=w)  
+        qml.RX(radius*2*np.pi - np.pi, wires=w)   
     
-    
-    # for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
-    #     qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
-    
-    # for item in two_comb_wires:
-    #     #qml.CNOT(wires=item)
-    #     w=item[1] 
-    #     zenith = inputs[:,w, index['eta']] # corresponding to eta
-    #     azimuth = inputs[:,w, index['phi']] # corresponding to phi
-    #     radius = inputs[:,w, index['pt']] # corresponding to pt
-    #     qml.CRY(radius*zenith,wires=item)
-    #     qml.CRZ(radius*azimuth,wires=item)
+    for item in subjet_comb_wires: 
+        qml.CY(wires=item)
 
-    for item in subjet_comb_wires:
-        #qml.CNOT(wires=item)
-        w=item[0] # Upload the subjet features a third time 
-        zenith = inputs[:,w, index['eta']] # corresponding to eta
-        azimuth = inputs[:,w, index['phi']] # corresponding to phi
-        radius = inputs[:,w, index['pt']] # corresponding to pt
-        qml.CRY(radius,wires=item)
-        qml.CRZ(radius,wires=item)
+    for phi,i in zip(weights[2*N:3*N],auto_wires):
+        qml.RX(phi,wires=i)
 
-    # for phi,theta,omega,i in zip(weights[3*N:4*N],weights[4*N:5*N],weights[5*N:],auto_wires):
-    #     qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
-    
-    for item in two_comb_wires: 
-        qml.CNOT(wires=item)
-    
     # FIXED: handle the case where ancillary_wires is an integer, which is the case when separate_ancilla is False
     if len(ancillary_wires)==1:
         ancillary_wirelist=ancillary_wires*len(ref_wires)
@@ -317,7 +300,7 @@ class QuantumTrainer():
     """
     def __init__(self, model: QuantumAutoencoder, lr: float = 0.001, optimizer: Callable = None, 
                  loss_fn: Callable = None, save: bool = True, train_max_n: int = 100000, 
-                 valid_max_n: int = 20000, epochs: int = 20, patience: int = 4,wandb=None, **kwargs: Any) -> None:
+                 valid_max_n: int = 20000, epochs: int = 20, patience: int = 2,wandb=None, lr_decay=False,**kwargs: Any) -> None:
         self.circuit=model.fetch_circuit()
         self.backend=model.fetch_backend()
         self.init_weights=kwargs['init_weights']
@@ -325,6 +308,7 @@ class QuantumTrainer():
         self.logger=kwargs['logger']
         self.train_max_n=train_max_n
         self.valid_max_n=valid_max_n
+        self.lr_decay=lr_decay
         self.epochs=epochs
         self.patience=patience
         self.saving=save
@@ -364,7 +348,7 @@ class QuantumTrainer():
         """
         self.is_evictable=True
         self.seed=seed
-
+    
     def run_training_loop(self,train_loader:DataLoader,val_loader:DataLoader):
         """
         Executes the full training loop, including training and validation.
@@ -377,6 +361,8 @@ class QuantumTrainer():
             Dict[str, List[float]]: Training and validation history (losses and accuracies).
         """
         self.print_params('Initial weights: ')
+        n_decays=0
+        last_decay=0
         for n_epoch in tqdm(range(self.epochs+1)):
             sample_counter=0
             batch_yield=0
@@ -384,12 +370,26 @@ class QuantumTrainer():
             
             losses=0.
             if (n_epoch>4):
-                if(abs(np.mean(self.history['val'][-3:])-np.mean(self.history['val'][-4]))<0.01):
-                    print("No improvement over last 3 epochs. Early stopping!")
-                    self.logger.info("\n\n No improvement over last 3 epochs. Early stopping! \n\n")
-                    self.save(self.save_dir,name='trained_model.pickle')
-                    break
-            
+                improvement=abs(np.mean(self.history['val'][-3:])-np.mean(self.history['val'][-4]))
+                if self.lr_decay:
+                    if (improvement<0.01)&(n_decays<self.patience)&(n_epoch-last_decay>=3):
+                        last_decay=self.current_epoch
+                        n_decays+=1
+                        self.optim.stepsize=self.optim.stepsize/2.
+                        self.logger.info(f'No improvement observed over last 3 epochs. Learning rate decayed to {self.optim.stepsize} at epoch {n_epoch}')
+                        
+                    if (improvement<0.01)&(n_decays>=self.patience):
+                        print(f"No improvement over last 3 epochs, and {self.patience} decay steps!")
+                        self.logger.info(f"\n\n No improvement over last 3 epochs and {self.patience} decay steps. Early stopping! \n\n")
+                        self.save(self.save_dir,name='trained_model.pickle')
+                        break
+                else:
+                    if (improvement<0.01):
+                        print(f"No improvement over last 3 epochs!")
+                        self.logger.info(f"\n\n No improvement over last 3 epochs and {self.patience} decay steps. Early stopping! \n\n")
+                        self.save(self.save_dir,name='trained_model.pickle')
+                        break
+                    
             if n_epoch>0:
                 print("Start Training")  
                 start=round(time.time(),2)
@@ -470,11 +470,28 @@ class QuantumTrainer():
                                 If not provided, the file name will be based on the current epoch.
         """
         if name is None:
-            if self.current_epoch>100: name = 'ep{:03}.pickle'.format(self.current_epoch)
-            else: name='ep{:02}.pickle'.format(self.current_epoch)
+            if self.current_epoch>100: 
+                name = 'ep{:03}.pickle'.format(self.current_epoch)
+                opt_name='optimizer_ep{:03}.json'.format(self.current_epoch)
+            else:
+                name='ep{:02}.pickle'.format(self.current_epoch)
+                opt_name='optimizer_ep{:02}.json'.format(self.current_epoch)
         if 'trained' not in name: save_dir=self.checkpoint_dir
+        else:
+            opt_name='optimizer.json'
         ut.Pickle({'weights':self.current_weights},name,path=save_dir)
-    
+        try:
+            optim_dict={'stepsize':self.optim.stepsize,'beta1':self.optim.beta1,'beta2':self.optim.beta2,'epsilon':self.optim.eps,\
+                        'fm':self.optim.fm,'sm':self.optim.sm,'t':self.optim.t}
+            # save dict to json file
+            import json
+            with open(os.path.join(save_dir,opt_name), 'w') as f:
+                json.dump(optim_dict, f)
+            print("Optimizer state saved")
+        except:
+            print("Failed to save optimizer state")
+
+        #print(f"Model saved to {os.path.join(save_dir,name)}")
     def get_current_epoch(self) -> None:
         """
         Returns the current epoch number during training.
