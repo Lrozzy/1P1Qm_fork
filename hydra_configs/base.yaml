@@ -9,9 +9,11 @@ train_n: 2000
 valid_n: 400
 batch_size: 100
 epochs: 25
+extra_weights: null
 backend: 'autograd'
 device_name: 'lightning.kokkos'
 lr: 0.05
+lr_decay: false
 save: true
 flat: false
 evictable: false
@@ -20,6 +22,7 @@ resume: false
 desc: 'Training run'
 norm_pt: false
 substructure: false
+patience: 2
 use_reuploading: false
 loss: 'semiclassical'
 save_dir: '/work/abal/qae_hep/saved_models/'
