@@ -287,7 +287,7 @@ class CASEJetClassDataset(CASEDelphesJetDataset):
             # Read data of shape (N,2,100,3) where N is the number of events, 2 is the number of jets, 100 is the number of particles and 3 is the (eta,phi,pt) of each particle
             msd=np.array(file[self.feature_key][:,self.j_msd_index])
             jet_pt=np.array(file[self.feature_key][:,self.jpt_index])
-            
+            jet_features=np.array(file[self.feature_key])
             if self.use_subjet_PFCands:
                 jet_etaphipt = np.array(file[self.data_key][()]) # because n_qubits is the number of particles
                 num_PFCands_subleading_jet=file['num_PFCands_subleading_jet'][()]
@@ -302,6 +302,7 @@ class CASEJetClassDataset(CASEDelphesJetDataset):
                     jet_etaphipt,extra_mask=select_subjet_constituents(jet_etaphipt, num_PFCands_subleading_jet, evt_subjet_idx, n_qubits=self.n_qubits,selection=self.selection)
                     jet_pt=jet_pt[extra_mask]
                     msd=msd[extra_mask]
+                    jet_features=jet_features[extra_mask]
                 elif self.selection=='random':
                     jet_etaphipt = select_subjet_constituents(jet_etaphipt, num_PFCands_subleading_jet, evt_subjet_idx, n_qubits=self.n_qubits,selection=self.selection)
                 else:
@@ -342,7 +343,7 @@ class CASEJetClassDataset(CASEDelphesJetDataset):
         print("sample max phi: ",np.max(jet_etaphipt[:,:,self.phi_index]))
         print("sample min phi: ",np.min(jet_etaphipt[:,:,self.phi_index]))
         if inference:
-            return jet_etaphipt,np.stack([msd,jet_pt],axis=-1),truth_label
+            return jet_etaphipt,jet_features,truth_label
         return jet_etaphipt, truth_label#,stacked_energies
     
     def load_for_inference(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
