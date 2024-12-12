@@ -25,6 +25,6 @@ request_GPUs = 1
 requirements = regexp("V100", TARGET.GPUs_DeviceName)
 
 Universe = docker
-docker_image = neutrinoman4/qml-lightning.gpu:v3.0
+docker_image = neutrinoman4/qml-lightning.gpu:v5.0
 
 Queue 1
