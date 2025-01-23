@@ -150,7 +150,7 @@ def main(cfg: DictConfig):
     # Initialize the trainer with WandB
     trainer = qc.QuantumTrainer(qAE, lr=cfg.lr, backend_name=cfg.backend, init_weights=init_weights, device_name=cfg.device_name,
                                 train_max_n=train_max_n, valid_max_n=valid_max_n, epochs=cfg.epochs, batch_size=cfg.batch_size,
-                                logger=logger, save=cfg.save, patience=cfg.patience, optimizer=optimizer, loss_fn=cost_fn,lr_decay=cfg.lr_decay, wandb=wandb)
+                                logger=logger, save=cfg.save, patience=cfg.patience, optimizer=optimizer,improv=cfg.improv, loss_fn=cost_fn,lr_decay=cfg.lr_decay, wandb=wandb)
 
     trainer.print_params('Initialized parameters!')
     trainer.set_directories(save_dir)
