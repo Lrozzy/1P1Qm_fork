@@ -110,12 +110,16 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
         qml.RY(radius * zenith, wires=w)   
         qml.RZ(radius * azimuth, wires=w)  
     # QAE Circuit
+    for item in two_comb_wires: 
+        qml.PauliX(wires=item[0])
+        qml.CNOT(wires=item)
+        qml.PauliX(wires=item[0])
+        #qml.CZ(wires=item)
 
-    for phi,theta,omega,i in zip(weights[:N],weights[N:2*N],weights[2*N:],auto_wires):
+    for phi,theta,omega,i in zip(weights[:N],weights[N:2*N],weights[2*N:3*N],auto_wires):
         qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
 
-    for item in two_comb_wires: 
-        qml.CNOT(wires=item)
+    
     
     # FIXED: handle the case where ancillary_wires is an integer, which is the case when separate_ancilla is False
     
@@ -155,7 +159,7 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         azimuth = inputs[:,w, index['phi']] # corresponding to phi
         #radius = inputs[:,w, index['pt']] # corresponding to pt
         # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
-        qml.RY(zenith, wires=w)   
+        qml.RY(zenith/2.0, wires=w)   
         qml.RZ(azimuth, wires=w)  
         #qml.RX(radius, wires=w)   
         
@@ -168,8 +172,9 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
     #     qml.CRZ(azimuth,wires=item)    
     
     for item in two_comb_wires:
-        qml.CNOT(wires=item)
-    
+        qml.CY(wires=item)
+        qml.CZ(wires=item)
+
     for phi,theta,i in zip(weights[:N],weights[N:2*N],auto_wires):
         qml.RY(phi,wires=i)
         qml.RZ(theta,wires=i)
@@ -179,14 +184,17 @@ def reuploading_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None
         # Variables named according to spherical coordinate system, it's easier to understand :)    
         radius = inputs[:,w, index['pt']] # corresponding to pt
         # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
-        qml.RX(radius*2*np.pi - np.pi, wires=w)   
+        qml.RY(radius*np.pi, wires=w)   
+        qml.RZ(radius*2*np.pi - np.pi, wires=w)   
     
-    for item in subjet_comb_wires: 
+    for item in two_comb_wires: 
         qml.CY(wires=item)
-
-    for phi,i in zip(weights[2*N:3*N],auto_wires):
-        qml.RX(phi,wires=i)
-
+        qml.CZ(wires=item)
+        
+    for phi,theta,i in zip(weights[2*N:3*N],weights[3*N:4*N],auto_wires):
+        qml.RY(phi,wires=i)
+        qml.RZ(theta,wires=i)
+        
     # FIXED: handle the case where ancillary_wires is an integer, which is the case when separate_ancilla is False
     if len(ancillary_wires)==1:
         ancillary_wirelist=ancillary_wires*len(ref_wires)
@@ -300,7 +308,7 @@ class QuantumTrainer():
     """
     def __init__(self, model: QuantumAutoencoder, lr: float = 0.001, optimizer: Callable = None, 
                  loss_fn: Callable = None, save: bool = True, train_max_n: int = 100000, 
-                 valid_max_n: int = 20000, epochs: int = 20, patience: int = 2,wandb=None, lr_decay=False,**kwargs: Any) -> None:
+                 valid_max_n: int = 20000, epochs: int = 20, patience: int = 2, improv:float=0.01,wandb=None, lr_decay:bool=False,**kwargs: Any) -> None:
         self.circuit=model.fetch_circuit()
         self.backend=model.fetch_backend()
         self.init_weights=kwargs['init_weights']
@@ -316,6 +324,7 @@ class QuantumTrainer():
         self.optim=optimizer
         self.quantum_loss=loss_fn
         self.current_epoch=0
+        self.improv=improv
         self.is_evictable=False
         self.wandb=wandb
         self.history={'train':[],'val':[],'accuracy':[]}
@@ -370,24 +379,27 @@ class QuantumTrainer():
             
             losses=0.
             if (n_epoch>4):
-                improvement=abs(np.mean(self.history['val'][-3:])-np.mean(self.history['val'][-4]))
-                if self.lr_decay:
-                    if (improvement<0.01)&(n_decays<self.patience)&(n_epoch-last_decay>=3):
-                        last_decay=self.current_epoch
-                        n_decays+=1
-                        self.optim.stepsize=self.optim.stepsize/2.
-                        self.logger.info(f'No improvement observed over last 3 epochs. Learning rate decayed to {self.optim.stepsize} at epoch {n_epoch}')
-                        
-                    if (improvement<0.01)&(n_decays>=self.patience):
-                        print(f"No improvement over last 3 epochs, and {self.patience} decay steps!")
-                        self.logger.info(f"\n\n No improvement over last 3 epochs and {self.patience} decay steps. Early stopping! \n\n")
-                        self.save(self.save_dir,name='trained_model.pickle')
-                        break
-                else:
-                    if (improvement<0.01):
-                        print(f"No improvement over last 3 epochs!")
-                        self.logger.info(f"\n\n No improvement over last 3 epochs and {self.patience} decay steps. Early stopping! \n\n")
-                        self.save(self.save_dir,name='trained_model.pickle')
+                recent_val_losses = self.history['val'][-3:]
+                previous_val_loss = self.history['val'][-4]
+                improvement = abs(np.mean(recent_val_losses) - previous_val_loss)
+
+                if improvement < self.improv:
+                    # Handle learning rate decay
+                    if self.lr_decay:
+                        if (n_decays < self.patience) and ((n_epoch - last_decay) >= 3):
+                            last_decay = self.current_epoch
+                            n_decays += 1
+                            self.optim.stepsize *= 0.5  # Use a parameter if needed
+                            self.logger.info(f'No improvement observed over last 3 epochs. '
+                                            f'Learning rate decayed to {self.optim.stepsize} at epoch {n_epoch}')
+                        elif n_decays >= self.patience:
+                            self.logger.info(f"\n\n No improvement over last 3 epochs and {self.patience} decay steps. Early stopping! \n\n")
+                            self.save(self.save_dir, name='trained_model.pickle')
+                            break
+                    else:
+                        # Early stopping without decay
+                        self.logger.info(f"\n\n No improvement over last 3 epochs. Early stopping! \n\n")
+                        self.save(self.save_dir, name='trained_model.pickle')
                         break
                     
             if n_epoch>0:
@@ -488,8 +500,8 @@ class QuantumTrainer():
             with open(os.path.join(save_dir,opt_name), 'w') as f:
                 json.dump(optim_dict, f)
             print("Optimizer state saved")
-        except:
-            print("Failed to save optimizer state")
+        except Exception as e:
+            print(f"Error saving optimizer state: {str(e)}")
 
         #print(f"Model saved to {os.path.join(save_dir,name)}")
     def get_current_epoch(self) -> None:
