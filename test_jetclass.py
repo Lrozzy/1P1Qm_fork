@@ -103,7 +103,7 @@ def main(cfg: DictConfig):
             use_subjet_PFCands=cfg.substructure
         )
     elif cfg.dataset.casefold()=='jetclass': 
-        qcd_files=sorted(glob.glob(paths.get_data_path('ZJetsToNuNu_val') + '/*.h5'))
+        qcd_files=sorted(glob.glob(paths.get_data_path('ZJetsToNuNu_flat_test') + '/*.h5'))
         qcd_dataset=cr.CASEJetClassDataset(
             filelist=qcd_files,
             input_shape=(len(qc.auto_wires), 3),
@@ -124,7 +124,7 @@ def main(cfg: DictConfig):
     
     
     if cfg.load:
-        with h5py.File(os.path.join(dump_dir, 'qcd_results.h5'), 'r') as f:
+        with h5py.File(os.path.join(out_dir, 'qcd_results.h5'), 'r') as f:
             qcd_fids = f['fids'][()]
             qcd_costs = f['costs'][()]
             qcd_features = f['jetFeatures'][()]
@@ -178,11 +178,12 @@ def main(cfg: DictConfig):
     fpr,tpr,thresholds=roc_curve(labels,costs)
     roc_auc=roc_auc_score(labels,costs)
 
-
-    bins_qcd,edges_qcd=nnp.histogram(qcd_fids,density=True,bins=400,range=[0,100])
-    bins_sig,edges_sig=nnp.histogram(sig_fids,density=True,bins=400,range=[0,100])
+    plot_label=ps.labels[cfg.signal.replace('_flat','')]
+    
+    bins_qcd,edges_qcd=nnp.histogram(qcd_fids,density=True,bins=50,range=[0,100])
+    bins_sig,edges_sig=nnp.histogram(sig_fids,density=True,bins=50,range=[0,100])
     plt.stairs(bins_qcd,edges_qcd,fill=True,label='q/g jets',alpha=0.6)
-    plt.stairs(bins_sig,edges_sig,fill=False,label=ps.labels[cfg.signal])
+    plt.stairs(bins_sig,edges_sig,fill=False,label=plot_label)
     plt.minorticks_on()
     #plt.grid(True,which='major',linestyle='--')
 
@@ -197,7 +198,7 @@ def main(cfg: DictConfig):
     plt.plot([0, 1], [0, 1], color='navy', linestyle='--')
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
-    plt.title(f'ROC: {ps.labels[cfg.signal]}')
+    plt.title(f'ROC: {plot_label}')
     plt.minorticks_on()
     #plt.grid(True,which='major',linestyle='--')
     plt.legend(loc='lower right')
@@ -209,7 +210,7 @@ def main(cfg: DictConfig):
     plt.xlabel('Signal efficiency')
     plt.ylabel('Significance Improvement')
     plt.xlim(0.1,1)
-    plt.title('SIC: '+ps.labels[cfg.signal])
+    plt.title('SIC: '+plot_label)
     plt.savefig(os.path.join(plot_dir,f'SIC_{cfg.signal}.png'))
     
     if log_wandb:
