@@ -58,7 +58,15 @@ path_dict:dict[str:str]={'QCD_train':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideban
         'TTBarLep': 'train/TTBarLep/',
         'TTBar': 'train/TTBar_/',
         'HToGG': 'train/HToGG/',
-        'ZToQQ': 'train/ZToQQ/'
+        'ZToQQ': 'train/ZToQQ/',
+        'ZJetsToNuNu_flat_test':'flat_test/ZJetsToNuNu/',
+        'HToCC_flat':'flat_test/HToCC/',
+        'HToBB_flat':'flat_test/HToBB/',
+        'WToQQ_flat':'flat_test/WToQQ/',
+        'TTBarLep_flat':'flat_test/TTBarLep/',
+        'TTBar_flat':'flat_test/TTBar_/',
+        'HToGG_flat':'flat_test/HToGG/',
+        'ZToQQ_flat':'flat_test/ZToQQ/',
            }
 
 eventFeatureNames:list[str]=['mJJ', 'j1Pt', 'j1Eta', 'j1Phi', 'j1M', 'j1E', 'j2Pt',
@@ -72,4 +80,6 @@ labels={'grav_1p5_narrow':'$M_{grav}=1.5$ TeV','grav_2p5_narrow':'$M_{grav}=2.5$
                 'HToBB':r'$H \rightarrow b \overline{b}$',\
                     'WToQQ':r'$W \rightarrow q \overline{q}$','TTBarLep':r'$t \rightarrow b l \nu$',\
                         'HToGG':r'$H \rightarrow gg$','TTBar':r'$t \rightarrow bq \overline{q}$',\
-                            'ZToQQ':r'$Z \rightarrow q \overline{q}$'}
+                            'ZToQQ':r'$Z \rightarrow q \overline{q}$',\
+                                'TTBarLep':r'$t \rightarrow bl\nu$',\
+                                    'TTBar':r'$t \rightarrow bq\overline{q}$'}
