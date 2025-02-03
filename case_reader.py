@@ -35,8 +35,8 @@ class CASEDelphesJetDataset(IterableDataset):
         np.ndarray: Batch of data samples.
     """
     def __init__(self, filelist:List[str]=None, batch_size:int=32, max_samples:int=5e4, data_key='jetConstituentsList',\
-                 feature_key='eventFeatures',input_shape:tuple[int]=(10, 3),epsilon:float=1.0e-4,train:bool=True,yield_energies=False,\
-                    normalize_pt:bool=False,use_subjet_PFCands:bool=False,logger=None):
+                 feature_key='eventFeatures',input_shape:tuple[int]=(10, 3),epsilon:float=1.0e-4,train:bool=True,\
+                    normalize_pt:bool=False,logger=None):
         super().__init__()
         self.filelist = sorted(filelist)
         self.batch_size = batch_size
@@ -47,7 +47,6 @@ class CASEDelphesJetDataset(IterableDataset):
         self.j1pt_index=ut.getIndex('event','j1Pt')
         self.j2pt_index=ut.getIndex('event','j2Pt') # Bug fix
         self.mjj_index=ut.getIndex('event','mJJ')
-        self.use_subjet_PFCands=use_subjet_PFCands
         self.max_samples = max_samples
         self.epsilon=epsilon
         self.data_key=data_key
@@ -105,26 +104,15 @@ class CASEDelphesJetDataset(IterableDataset):
             j1pt=np.array(file[self.feature_key][:,self.j1pt_index])
             j2pt=np.array(file[self.feature_key][:,self.j2pt_index])
 
-            if self.use_subjet_PFCands:
-                if self.logger is not None:
-                    self.logger.info(f"Reading {self.n_qubits//2} PFCands from each subjet for a total of {self.n_qubits} PFCands per jet")
-                else:
-                    print(f"Reading {self.n_qubits//2} PFCands from each subjet for a total of {self.n_qubits} PFCands per jet")
-                jet_etaphipt = np.array(file[self.data_key][()]) # because n_qubits is the number of particles
-                num_PFCands_subleading_jet=file['num_PFCands_subleading_jet'][()]
-                evt_subjet_idx=file['PFCand_subjet_idx'][()] # N x 2 x 100
-                mask_limit=np.where(num_PFCands_subleading_jet>self.n_qubits//2,self.n_qubits//2,self.n_qubits-num_PFCands_subleading_jet) # N x 2
-                pf_mask=evt_subjet_idx<mask_limit[...,None] # N x 2 x 100
-                jet_etaphipt=jet_etaphipt[pf_mask].reshape(-1,2,self.n_qubits,3) # N x 2 x n_qubits x 3
+            
+            if self.logger is not None:
+                self.logger.info(f"Reading hardest {self.n_qubits} PFCands per jet")
             else:
-                if self.logger is not None:
-                    self.logger.info(f"Reading hardest {self.n_qubits} PFCands per jet")
-                else:
-                    print(f"Reading hardest {self.n_qubits} PFCands per jet")
-                jet_etaphipt = np.array(file[self.data_key][()]) # because n_qubits is the number of particles
-                sorted_indices = np.argsort(-jet_etaphipt[...,self.pt_index], axis=2)
-                jet_etaphipt = np.take_along_axis(jet_etaphipt, sorted_indices[...,None], axis=2)
-                jet_etaphipt = jet_etaphipt[:,:,:self.n_qubits,:]
+                print(f"Reading hardest {self.n_qubits} PFCands per jet")
+            jet_etaphipt = np.array(file[self.data_key][()]) # because n_qubits is the number of particles
+            sorted_indices = np.argsort(-jet_etaphipt[...,self.pt_index], axis=2)
+            jet_etaphipt = np.take_along_axis(jet_etaphipt, sorted_indices[...,None], axis=2)
+            jet_etaphipt = jet_etaphipt[:,:,:self.n_qubits,:]
             #jet1_energy=np.array(file[self.feature_key][:,self.j1E_index])
             #jet2_energy=np.array(file[self.feature_key][:,self.j2E_index])
             
@@ -235,12 +223,9 @@ class CASEDelphesJetDataset(IterableDataset):
                 batch_labels = torch.from_numpy(batch_labels).float() # Assuming labels are floats
                 
                 sample_counter += batch_data.shape[0]
-                if self.train:
-                    yield np.array(batch_data,requires_grad=False)
-                else:
-                    yield np.array(batch_data,requires_grad=False), np.array(batch_labels,requires_grad=False)
+                yield np.array(batch_data,requires_grad=False), np.array(batch_labels,requires_grad=False)
 
-def OneP1QDataLoader(input_shape:tuple[int]=(100, 3),train:bool=True,use_subjet_PFCands:bool=False,dataset='delphes',**kwargs) -> DataLoader:
+def OneP1QDataLoader(input_shape:tuple[int]=(100, 3),train:bool=True,dataset='delphes',**kwargs) -> DataLoader:
     '''
     Wrapper function to create a DataLoader for the CASEDelphesJetDataset.
     Args:
@@ -252,13 +237,12 @@ def OneP1QDataLoader(input_shape:tuple[int]=(100, 3),train:bool=True,use_subjet_
         DataLoader: Torch DataLoader object that yields batches of data.
     '''
     print(f"Will read only {input_shape[0]} particles per jet")
-    if use_subjet_PFCands:
-        print("\t Divided between 2 subjets per jet")
+    
     
     if dataset.casefold()=='delphes':
-        dset = CASEDelphesJetDataset(input_shape=input_shape,train=train,use_subjet_PFCands=use_subjet_PFCands,feature_key='eventFeatures',**kwargs)
+        dset = CASEDelphesJetDataset(input_shape=input_shape,train=train,feature_key='eventFeatures',**kwargs)
     elif dataset.casefold()=='jetclass':
-        dset = CASEJetClassDataset(input_shape=input_shape,train=train,use_subjet_PFCands=use_subjet_PFCands,feature_key='jetFeatures',**kwargs)
+        dset = CASEJetClassDataset(input_shape=input_shape,train=train,feature_key='jetFeatures',**kwargs)
     else:
         raise NameError("Dataset type must be either delphes or jetclass")
     return DataLoader(dset, batch_size=None)  # None for batch_size since batching is managed by the dataset
@@ -288,37 +272,18 @@ class CASEJetClassDataset(CASEDelphesJetDataset):
             msd=np.array(file[self.feature_key][:,self.j_msd_index])
             jet_pt=np.array(file[self.feature_key][:,self.jpt_index])
             jet_features=np.array(file[self.feature_key])
-            if self.use_subjet_PFCands:
-                jet_etaphipt = np.array(file[self.data_key][()]) # because n_qubits is the number of particles
-                num_PFCands_subleading_jet=file['num_PFCands_subleading_jet'][()]
-                evt_subjet_idx=file['PFCand_subjet_idx'][()]
-                 # N x 100
-                if self.logger is not None:
-                    self.logger.info(f"Reading {self.n_qubits//2} PFCands from each subjet for a total of {self.n_qubits} PFCands per jet")
-                else:
-                    print(f"Reading {self.n_qubits//2} PFCands from each subjet for a total of {self.n_qubits} PFCands per jet")
-                
-                if self.selection=='equal':
-                    jet_etaphipt,extra_mask=select_subjet_constituents(jet_etaphipt, num_PFCands_subleading_jet, evt_subjet_idx, n_qubits=self.n_qubits,selection=self.selection)
-                    jet_pt=jet_pt[extra_mask]
-                    msd=msd[extra_mask]
-                    jet_features=jet_features[extra_mask]
-                elif self.selection=='random':
-                    jet_etaphipt = select_subjet_constituents(jet_etaphipt, num_PFCands_subleading_jet, evt_subjet_idx, n_qubits=self.n_qubits,selection=self.selection)
-                else:
-                    raise NameError(f"Selection strategy {self.selection} not recognised - must be either random or equal")
+            
+            if self.logger is not None:
+                self.logger.info(f"Reading hardest {self.n_qubits} PFCands per jet")
             else:
-                if self.logger is not None:
-                    self.logger.info(f"Reading hardest {self.n_qubits} PFCands per jet")
-                else:
-                    print(f"Reading hardest {self.n_qubits} PFCands per jet")
-                jet_etaphipt = np.array(file[self.data_key][()]) # because n_qubits is the number of particles
-                sorted_indices = np.argsort(-jet_etaphipt[...,self.pt_index], axis=-1)
-                jet_etaphipt = np.take_along_axis(jet_etaphipt, sorted_indices[...,None], axis=1)
-                jet_etaphipt = jet_etaphipt[:,:self.n_qubits,:]
+                print(f"Reading hardest {self.n_qubits} PFCands per jet")
+            jet_etaphipt = np.array(file[self.data_key][()]) # because n_qubits is the number of particles
+            sorted_indices = np.argsort(-jet_etaphipt[...,self.pt_index], axis=-1)
+            jet_etaphipt = np.take_along_axis(jet_etaphipt, sorted_indices[...,None], axis=1)
+            jet_etaphipt = jet_etaphipt[:,:self.n_qubits,:]
                 
             try:
-                truth_label = np.array(file['truth_label'][()])
+                truth_label = np.array(file['truth_labels'][()])
             except:
                 if 'zjetsto'.casefold() in file_path.casefold(): # case-insensitive search
                     truth_label = np.zeros(jet_etaphipt.shape[0])
@@ -380,7 +345,7 @@ class CASEJetClassDataset(CASEDelphesJetDataset):
         jet_array=jet_array[:self.max_samples]
         jetFeatures_array=jetFeatures_array[:self.max_samples]
         truth_labels=truth_labels[:self.max_samples]
-        return jet_array,jetFeatures_array,truth_labels
+        return np.array(jet_array,requires_grad=False),np.array(jetFeatures_array,requires_grad=False),np.array(truth_labels,requires_grad=False)
 
 def select_subjet_constituents(jet_etaphipt, num_PFCands_subleading_jet, evt_subjet_idx, n_qubits=8,selection='equal'):
     """

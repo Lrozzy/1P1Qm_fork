@@ -1,54 +1,64 @@
 import pennylane.numpy as np
+import sys
+def mean_squared_error(predictions,targets):
+    return np.mean((predictions-targets)**2)
 
-def semi_classical_cost(weights,inputs=None,quantum_cost=None,return_fid=False):
+def binary_cross_entropy(labels, probs,bias=None):
+    # Ensure that probabilities are bounded between (0, 1)
+    probs = np.clip(probs, 1e-15, 1 - 1e-15)  # Avoid log(0) which would cause issues
+    # Compute Binary Cross-Entropy
+    loss = -np.mean(labels * np.log(probs) + (1 - labels) * np.log(1 - probs))
+    # if bias is not None:
+    #     loss+=bias
+    return loss
+
+def sigmoid(x):
+    return 1/(1+np.exp(-x))
+
+def semi_classical_cost(weights,inputs=None,quantum_circuit=None,return_fid=False):
     if return_fid:
-        fid=quantum_cost(weights,inputs)
+        fid=quantum_circuit(weights,inputs)
         #fid=np.sqrt(fid)
         cost=1.-fid
         return 100.*np.array(cost),100.*np.array(fid)
     
     # the minus sign is to maximize the fidelity between the trash and reference states - which implies that the output and input states are close to each other
-    fid=quantum_cost(weights,inputs)
+    fid=quantum_circuit(weights,inputs)
     #fid=np.sqrt(fid)
-    cost=1-fid#np.array([-quantum_cost(weights,item) for item in inputs]).mean()
+    cost=1-fid#np.array([-quantum_circuit(weights,item) for item in inputs]).mean()
     return 100.*np.array(cost,requires_grad=False)
 
-def batch_semi_classical_cost(weights,inputs=None,quantum_cost=None,return_fid=False):
+def batch_semi_classical_cost(weights,inputs=None,quantum_circuit=None,return_fid=False):
     if return_fid:
-        fid=quantum_cost(weights,inputs)
+        fid=quantum_circuit(weights,inputs)
         #fid=np.sqrt(fid)
         cost=1.-fid
         return np.array(100.*cost,requires_grad=True).mean(),np.array(100.*fid,requires_grad=True).mean()
     # the minus sign is to maximize the fidelity between the trash and reference states - which implies that the output and input states are close to each other
-    fid=quantum_cost(weights,inputs)
+    fid=quantum_circuit(weights,inputs)
     #fid=np.sqrt(fid)
     cost=1-fid
-    batched_average_cost=100.*(np.array(cost,requires_grad=True).mean())#np.array([-quantum_cost(weights,item) for item in inputs]).mean()
+    batched_average_cost=100.*(np.array(cost,requires_grad=True).mean())#np.array([-quantum_circuit(weights,item) for item in inputs]).mean()
     return batched_average_cost
 
-def batch_quantum_cost(weights,inputs=None,quantum_cost=None,return_fid=False):
-    probs=np.array(quantum_cost(weights,inputs))[...,0] # the first element is the probability of the |0> state, which is a function of the fidelity
-    # Prob(0) = 0.5*(1+fid**2)  --> We need to invert this
-    fid = np.sqrt(2*probs-1)
-    cost=1-fid
-    if return_fid:
-        return np.mean(100.*cost),np.mean(100.*fid)
-    # the minus sign is to maximize the fidelity between the trash and reference states - which implies that the output and input states are close to each other
-    #fid=np.sqrt(fid)
+def VQC_cost(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=False,val=False,loss_type='BCE'):
+    bias=weights[-1]
+    exp_vals=np.array(quantum_circuit(weights,inputs),requires_grad=True) # n_qubits x batch_size
+    #exp_vals=0.5*(1+np.mean(exp_vals,axis=0,rquires_grad=True)) # reduce over the first axis, which is the number of wires
+    #score = expvals
+    score=sigmoid(exp_vals+bias)
+    #score=1+0.5*exp_vals#+bias
     
-    batched_average_cost=100.*np.mean(cost)#np.array([-quantum_cost(weights,item) for item in inputs]).mean()
-    return batched_average_cost
-
-
-def quantum_cost(weights,inputs=None,quantum_cost=None,return_fid=False):
-    probs=np.array(quantum_cost(weights,inputs))[...,0] # the first element is the probability of the |0> state, which is a function of the fidelity
-    # Prob(0) = 0.5*(1+fid**2)  --> We need to invert this
-    fid = np.sqrt(2*probs-1)
-    cost=1-fid
-    if return_fid:
-        return np.mean(100.*cost,axis=0,requires_grad=False),np.mean(100.*fid,axis=0,requires_grad=False)
-    # the minus sign is to maximize the fidelity between the trash and reference states - which implies that the output and input states are close to each other
-    #fid=np.sqrt(fid)
+    if loss_type=='BCE':
+        loss_fn=binary_cross_entropy(labels,score)
+    elif loss_type=='MSE':
+        loss_fn=mean_squared_error(labels,score)
+    else:
+        sys.exit(-1)
     
-    batched_average_cost=100.*np.mean(cost,axis=0,requires_grad=False)#np.array([-quantum_cost(weights,item) for item in inputs]).mean()
-    return batched_average_cost
+    if return_scores:
+        if val:
+            score=np.mean(exp_vals)
+        return loss_fn, score
+    return np.array(loss_fn,requires_grad=True)
+

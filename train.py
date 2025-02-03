@@ -35,11 +35,7 @@ def main(cfg: DictConfig):
     # Logging setup
     logger.add(os.path.join(save_dir, 'logs.log'), rotation='10 MB', backtrace=True, diagnose=True, level='DEBUG', mode="w")
     logger.info("########################################### \n\n")
-    
-    if cfg.separate_ancilla:
-        logger.info(f"This circuit contains {cfg.wires + 2 * cfg.trash_qubits} qubits")
-    else:
-        logger.info(f"This circuit contains {cfg.wires + cfg.trash_qubits + 1} qubits")
+    logger.info(f"This circuit contains {cfg.wires} qubits")
     
     print("Will save models to: ", save_dir)
 
@@ -49,8 +45,7 @@ def main(cfg: DictConfig):
         f.write(repr(cfg))
 
     # Further setup based on config
-    use_reuploading = cfg.use_reuploading  # default is True
-
+    
     if cfg.resume:
         test_args = ut.Unpickle(os.path.join(save_dir, 'args.pickle'))
         import importlib; qc = importlib.import_module('saved_models.' + cfg.seed + '.FROZEN_ARCHITECTURE')
@@ -69,15 +64,14 @@ def main(cfg: DictConfig):
     else:
         import quantum.architectures as qc
         logger.info("########################################### \n\n")
-        if cfg.separate_ancilla:
-            logger.info(f"This circuit contains {cfg.wires + 2 * cfg.trash_qubits} qubits")
-        else:
-            logger.info(f"This circuit contains {cfg.wires + cfg.trash_qubits + 1} qubits")
+        logger.info(f"This circuit contains {cfg.wires} qubits")
         logger.info("\n\n ########################################### \n\n")
         tmpfile = os.path.join(save_dir, 'FROZEN_ARCHITECTURE.py')
         subprocess.run(['cp', os.path.join(base_dir,'quantum/architectures.py') ,tmpfile])
         tmpfile = os.path.join(save_dir, 'FROZEN_DATAREADER.py')
         subprocess.run(['cp', os.path.join(base_dir,'case_reader.py'), tmpfile])
+        tmpfile = os.path.join(save_dir, 'FROZEN_LOSS.py')
+        subprocess.run(['cp', os.path.join(base_dir,'quantum/losses.py'), tmpfile])
         
         
     logger.info(f"Feature are scaled to the following limits: {ut.feature_limits}")
@@ -89,27 +83,17 @@ def main(cfg: DictConfig):
     if cfg.flat:
         logger.info("Using flat mjj distribution for training")
 
-    non_trash = cfg.wires - cfg.trash_qubits
-    assert non_trash > 0, 'Need strictly positive dimensional compressed representation of input state!'
-    qAE = qc.QuantumAutoencoder(wires=cfg.wires, shots=cfg.shots, trash_qubits=cfg.trash_qubits, dev_name=cfg.device_name, separate_ancilla=cfg.separate_ancilla)
-    qAE.set_circuit(reuploading=use_reuploading)
+    qAE = qc.QuantumClassifier(wires=cfg.wires, shots=cfg.shots,dev_name=cfg.device_name,layers=cfg.num_layers)
+    qAE.set_circuit()
 
-    if use_reuploading:
-        NUM_WEIGHTS = len(qc.auto_wires) * 6
-    else:
-        NUM_WEIGHTS = len(qc.auto_wires) * 3
+    NUM_WEIGHTS = len(qc.auto_wires)*3*cfg.num_layers+1 # Extra weight for the bias term in VQC
         
     if not cfg.resume:
-        init_weights = qc.np.random.uniform(0, qc.np.pi, size=(NUM_WEIGHTS,), requires_grad=True)
+        init_weights = qc.np.float64(qc.np.random.uniform(0, qc.np.pi, size=(NUM_WEIGHTS,), requires_grad=True))
 
     train_max_n = cfg.train_n
     valid_max_n = cfg.valid_n
-    if cfg.loss=='quantum':
-        cost_fn = loss.batch_quantum_cost
-        logger.info("Using qml.probs() to compute fidelity")
-    else:
-        cost_fn = loss.batch_semi_classical_cost
-        logger.info("Using qml.expval(Z) for fidelity computation")
+    cost_fn=loss.VQC_cost
     qc.print_training_params()
 
     # Save initial arguments for logging purposes
@@ -118,14 +102,8 @@ def main(cfg: DictConfig):
         f.write(repr(cfg))
 
     # Load the data and create a dataloader
-    if cfg.dataset.casefold()=='jetclass':
-        data_key='ZJetsToNuNu_flat' if cfg.flat else 'ZJetsToNuNu_train'
-        val_key='ZJetsToNuNu_test'
-    elif cfg.dataset.casefold()=='delphes':
-        data_key = 'QCD_flat_pt' if cfg.flat else 'QCD_train'
-        val_key = 'QCD_test'
-    else:
-        raise NameError(f"Dataset {cfg.dataset} not recognized, must be either jetclass or delphes")
+    data_key='VQC_train'
+    val_key='VQC_val'
     
     logger.info(f'loading data from {ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key)}')
     train_filelist = sorted(glob.glob(os.path.join(ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key), '*.h5')))
@@ -138,11 +116,9 @@ def main(cfg: DictConfig):
     logger.info(f"Validating on {len(val_filelist)} files found at {ps.PathSetter(data_path=cfg.data_dir).get_data_path(val_key)}")
 
     train_loader = cr.OneP1QDataLoader(filelist=train_filelist, batch_size=cfg.batch_size, input_shape=(len(qc.auto_wires), 3), train=True,
-                                            max_samples=train_max_n, normalize_pt=cfg.norm_pt, \
-                                                use_subjet_PFCands=cfg.substructure,logger=logger,dataset=cfg.dataset,selection=cfg.PFCand_selection_type)
+                                            max_samples=train_max_n, normalize_pt=cfg.norm_pt, logger=logger,dataset=cfg.dataset)
     val_loader = cr.OneP1QDataLoader(filelist=val_filelist, batch_size=cfg.batch_size, input_shape=(len(qc.auto_wires), 3), train=False,
-                                          max_samples=valid_max_n, normalize_pt=cfg.norm_pt, \
-                                            use_subjet_PFCands=cfg.substructure,dataset=cfg.dataset,selection=cfg.PFCand_selection_type)
+                                          max_samples=valid_max_n, normalize_pt=cfg.norm_pt, dataset=cfg.dataset)
 
     # Initialize the optimizer
     optimizer = qc.qml.AdamOptimizer(stepsize=cfg.lr)
@@ -150,7 +126,8 @@ def main(cfg: DictConfig):
     # Initialize the trainer with WandB
     trainer = qc.QuantumTrainer(qAE, lr=cfg.lr, backend_name=cfg.backend, init_weights=init_weights, device_name=cfg.device_name,
                                 train_max_n=train_max_n, valid_max_n=valid_max_n, epochs=cfg.epochs, batch_size=cfg.batch_size,
-                                logger=logger, save=cfg.save, patience=cfg.patience, optimizer=optimizer,improv=cfg.improv, loss_fn=cost_fn,lr_decay=cfg.lr_decay, wandb=wandb)
+                                logger=logger, save=cfg.save, patience=cfg.patience, optimizer=optimizer,improv=cfg.improv,\
+                                      loss_fn=cost_fn,lr_decay=cfg.lr_decay, wandb=wandb,loss_type=cfg.loss)
 
     trainer.print_params('Initialized parameters!')
     trainer.set_directories(save_dir)
@@ -160,7 +137,7 @@ def main(cfg: DictConfig):
         logger.info(f"Resuming training from epoch {trainer.current_epoch}")
     else:
         logger.info(f"Training started at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
-        logger.info(f'Epochs: {cfg.epochs} | Learning rate: {cfg.lr} | Batch size: {cfg.batch_size} \nBackend: {cfg.backend} | Wires: {cfg.wires} | Trash qubits: {cfg.trash_qubits} | Shots: {cfg.shots} \n')    
+        logger.info(f'Epochs: {cfg.epochs} | Learning rate: {cfg.lr} | Batch size: {cfg.batch_size} \nBackend: {cfg.backend} | Wires: {cfg.wires} | Shots: {cfg.shots} \n')    
         logger.info(f'Additional information: {cfg.desc}')
 
     if cfg.evictable:
