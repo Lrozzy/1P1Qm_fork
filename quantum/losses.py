@@ -46,7 +46,7 @@ def VQC_cost(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=
     exp_vals=np.array(quantum_circuit(weights,inputs),requires_grad=True) # n_qubits x batch_size
     #exp_vals=0.5*(1+np.mean(exp_vals,axis=0,rquires_grad=True)) # reduce over the first axis, which is the number of wires
     #score = expvals
-    score=sigmoid(exp_vals+bias)
+    score=(exp_vals+bias)
     #score=1+0.5*exp_vals#+bias
     
     if loss_type=='BCE':
@@ -55,10 +55,25 @@ def VQC_cost(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=
         loss_fn=mean_squared_error(labels,score)
     else:
         sys.exit(-1)
-    
     if return_scores:
         if val:
             score=np.mean(exp_vals)
         return loss_fn, score
     return np.array(loss_fn,requires_grad=True)
 
+def probabilistic_loss(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=False,val=False,loss_type='BCE'):
+    batch_size=len(labels)
+    probs=np.array(quantum_circuit(weights,inputs),requires_grad=True) # n_qubits x batch_size
+    
+    if batch_size==1:
+        scores=1-probs[labels[0]]
+    else:
+        scores=1-probs[np.arange(probs.shape[0]), labels]
+    loss_fn=np.mean(scores)
+        
+    if return_scores:
+        if val:
+            score=np.mean(scores)
+        return loss_fn, score
+    return np.array(loss_fn,requires_grad=True)
+    
