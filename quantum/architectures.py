@@ -17,13 +17,14 @@ two_comb_wires = None
 
 auto_wires = None
 ref_wires = None
-ancillary_wires = None
+truth_wire = None
+
 num_layers = None
 index = None
 n_trash_qubits = -1
 SEPARATE_ANCILLA=False
 
-def initialize(wires:int=4,layers:int=1):
+def initialize(wires:int=4,layers:int=1,use_ancilla=False):
     """
     Initializes the wire(qubit) indices, creates the two-combinations and sets up other necessary variables globally
 
@@ -35,7 +36,12 @@ def initialize(wires:int=4,layers:int=1):
     
     
     N_QUBITS=wires
+    if use_ancilla:
+        N_QUBITS+=1
+        truth_wire=N_QUBITS # the last wire is the truth wire
+        
     all_wires=[_ for _ in range(N_QUBITS)]
+    
     two_comb_wires=list(combinations([i for i in range(wires)],2))
     auto_wires=all_wires[:wires]
     num_layers=layers
@@ -68,6 +74,7 @@ def print_training_params()->None:
     print('two_comb_wires:',two_comb_wires)
     print('no. of layers:',num_layers)
     print('index:',index)
+    print('Using truth wire (if None, then unused) :', truth_wire)
     print("\n ############################################## \n")
     print("Sleep on it for 3s")
     print("Maybe you want to change something?")
@@ -90,27 +97,84 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     # State preparation for all wires
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
     # State preparation for all wires
-    
-    for w in auto_wires:
-        # Variables named according to spherical coordinate system, it's easier to understand :)
-        
-        zenith = inputs[:,w, index['eta']] # corresponding to eta
-        azimuth = inputs[:,w, index['phi']] # corresponding to phi
-        radius = inputs[:,w, index['pt']] # corresponding to pt
-        # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
-        qml.RX(zenith, wires=w)   
-        qml.RY(azimuth, wires=w)
-        qml.RZ(radius*np.pi, wires=w)
         
         # QAE Circuit
     for L in range(num_layers):
+        for w in auto_wires:
+        # Variables named according to spherical coordinate system, it's easier to understand :)
+            zenith = np.squeeze(inputs[:,w, index['eta']]) # corresponding to eta
+            azimuth = np.squeeze(inputs[:,w, index['phi']]) # corresponding to phi
+            radius = np.squeeze(inputs[:,w, index['pt']]) # corresponding to pt
+            if inputs.shape[0]==1:
+                zenith=zenith.item()
+                azimuth=azimuth.item()
+                radius=radius.item()
+            qml.RY(zenith*radius, wires=w)
+            qml.RZ(radius*azimuth/2., wires=w)
+            #qml.RX(radius*np.pi, wires=w)
+            # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
+            # qml.RX(zenith/2., wires=w)   
+            # qml.RY(azimuth/2., wires=w)
+            # qml.RZ(radius*np.pi*2, wires=w)
+            #qml.U3(zenith/2., azimuth/2., radius*np.pi*2, wires=w)
+            start=3*L*N
+        
+        for item in auto_wires: 
+            qml.CNOT(wires=[item,(item+1)%N])  # ring of CNOTs
+        
+        # for item in two_comb_wires: 
+        #     qml.CRY(inputs[:,item[1],index['pt']],wires=item)  
+        
+        for phi,theta,omega,i in zip(weights[start:start+N],weights[start+N:start+2*N],weights[start+2*N:start+3*N],auto_wires):
+            qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+
+        
+    # for item in two_comb_wires: 
+    #     qml.CZ(wires=item)
+    
+    
+    #expectation_values = [qml.expval(qml.PauliZ(i)) for i in auto_wires] 
+    #return expectation_values # expectation value of the first qubit, bounded in [0,1.0] plus a bias term
+    #fidelities = [qml.expval(qml.PauliZ(i)) for i in ancillary_wires]
+    return qml.expval(qml.PauliZ(0))
+    #return qml.probs(0)
+
+def ancilla_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
+    """
+    Defines the quantum autoencoder (QAE) circuit using provided weights and inputs.
+
+    Args:
+        weights (np.ndarray): Circuit parameters (AKA weights) for rotations.
+        inputs (np.ndarray): Input data to be used in the circuit. Defaults to None.
+
+    Returns:
+        Any: Expected value of Pauli-Z tensor of 1st qubit
+    """
+    # State preparation for all wires
+    N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
+    # State preparation for all wires
+        # QAE Circuit
+    for L in range(num_layers):
+        for w in auto_wires:
+        # Variables named according to spherical coordinate system, it's easier to understand :)
+            zenith = inputs[:,w, index['eta']] # corresponding to eta
+            azimuth = inputs[:,w, index['phi']] # corresponding to phi
+            radius = inputs[:,w, index['pt']] # corresponding to pt
+            qml.RZ(azimuth/2., wires=w)
+            qml.RY(zenith, wires=w)
+            qml.RX(radius*np.pi, wires=w)
+            # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
+            # qml.RX(zenith/2., wires=w)   
+            # qml.RY(azimuth/2., wires=w)
+            # qml.RZ(radius*np.pi*2, wires=w)
+            #qml.U3(zenith/2., azimuth/2., radius*np.pi*2, wires=w)
         start=3*L*N
         
         for item in two_comb_wires: 
             qml.CNOT(wires=item)  
         
         for item in two_comb_wires: 
-            qml.CY(wires=item)  
+            qml.CRY(inputs[:,item[1],index['pt']],wires=item)  
         
         for phi,theta,omega,i in zip(weights[start:start+N],weights[start+N:start+2*N],weights[start+2*N:start+3*N],auto_wires):
             qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
@@ -126,6 +190,7 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     return qml.expval(qml.PauliZ(0))
     #return qml.sum(*fidelities) / len(ancillary_wires)
 
+
 class QuantumClassifier:
     """
     A class that constructs a Quantum Autoencoder (QAE) using pre-defined circuits.
@@ -137,21 +202,24 @@ class QuantumClassifier:
         dev_name (str): Name of the quantum device to use.
         backend_name (str): Backend for the QNode (e.g., 'autograd', 'torch', 'jax').
         test (bool): If True, sets the circuit immediately for testing.
-        separate_ancilla (bool): If True, uses a separate ancillary qubit for each trash/reference qubit pair.
     """
-    def __init__(self, wires:int=4,shots=5000,dev_name:str='default.qubit',backend_name:str='autograd',layers:int=1,test=False):
+    def __init__(self, wires:int=4,shots=5000,dev_name:str='default.qubit',ancilla:bool=False,backend_name:str='autograd',layers:int=1,test=False):
         initialize(wires=wires,layers=layers)
         self.device=set_device(shots=shots,device_name=dev_name)
         self.backend=backend_name
         self.current_weights=None
         self.circuit = None
+        self.ancilla = ancilla
         if test: self.set_circuit() # Set the circuit for inference
-    def set_circuit(self)->None:
+    def set_circuit(self,ancilla=False)->None:
         """
         Configures the QNode circuit for the quantum autoencoder.
 
         """
-        self.circuit = qml.QNode(circuit,self.device,interface=self.backend)
+        if ancilla:
+            self.circuit=qml.QNode(ancilla_circuit,self.device,interface=self.backend)
+        else:
+            self.circuit = qml.QNode(circuit,self.device,interface=self.backend)
     def fetch_circuit(self) -> qml.QNode:
         """
         Retrieves the quantum circuit for inference or training.
@@ -196,7 +264,7 @@ class QuantumClassifier:
         print("Running in inference mode \n No batching will be performed so don't expect a progress bar")
         if self.current_weights is None:
             raise ValueError('Weights not initialized. Load a model first by calling load_weights(model_path)')       
-        costs,scores=loss_fn(self.current_weights,inputs=data,labels=labels,quantum_circuit=self.circuit,return_scores=True,type=loss_type)
+        costs,scores=loss_fn(self.current_weights,inputs=data,labels=labels,quantum_circuit=self.circuit,return_scores=True,loss_type=loss_type)
         print("Done")
         return costs,scores
     
@@ -304,8 +372,7 @@ class QuantumTrainer():
                             last_decay = self.current_epoch
                             n_decays += 1
                             self.optim.stepsize *= 0.5  # Use a parameter if needed
-                            self.logger.info(f'No improvement observed over last 3 epochs. '
-                                            f'Learning rate decayed to {self.optim.stepsize} at epoch {n_epoch}')
+                            self.logger.info(f'No improvement observed over last 3 epochs. \n Learning rate decayed to {self.optim.stepsize} at epoch {n_epoch}')
                         elif n_decays >= self.patience:
                             self.logger.info(f"\n\n No improvement over last 3 epochs and {self.patience} decay steps. Early stopping! \n\n")
                             self.save(self.save_dir, name='trained_model.pickle')
