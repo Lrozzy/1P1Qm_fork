@@ -82,7 +82,10 @@ def main(cfg: DictConfig):
         logger.info(f"pT will also be scaled assuming above maxima")
     if cfg.flat:
         logger.info("Using flat mjj distribution for training")
-
+    if cfg.loss=='prob':
+        cost_fn=loss.probabilistic_loss#loss.VQC_cost
+    else:
+        cost_fn=loss.VQC_cost
     qAE = qc.QuantumClassifier(wires=cfg.wires, shots=cfg.shots,dev_name=cfg.device_name,layers=cfg.num_layers)
     qAE.set_circuit()
 
@@ -93,7 +96,7 @@ def main(cfg: DictConfig):
 
     train_max_n = cfg.train_n
     valid_max_n = cfg.valid_n
-    cost_fn=loss.VQC_cost
+    
     qc.print_training_params()
 
     # Save initial arguments for logging purposes

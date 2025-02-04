@@ -99,8 +99,8 @@ def main(cfg: DictConfig):
     # Inference
     else:
         etaphipt, features, labels = dataset.load_for_inference()
-        import pdb;pdb.set_trace()
-        costs, scores = qClassifier.run_inference(data=etaphipt, labels=labels,loss_fn=cost_fn)
+        #   import pdb;pdb.set_trace()
+        costs, scores = qClassifier.run_inference(data=etaphipt, labels=labels,loss_fn=cost_fn,loss_type=cfg.loss)
         
         # Save results
         
@@ -112,7 +112,7 @@ def main(cfg: DictConfig):
             f.create_dataset('costs', data=costs)
             f.create_dataset('truth_labels', data=labels)
         
-
+    
     fpr,tpr,thresholds=roc_curve(labels,scores)
     roc_auc=roc_auc_score(labels,scores)
 
