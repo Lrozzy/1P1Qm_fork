@@ -201,11 +201,11 @@ class CASEDelphesJetDataset(IterableDataset):
             data, labels = self.load_and_preprocess_file(file_path)
             # Shuffle the data from this file only if training on a per-jet basis, otherwise it becomes necessary to preserve the order of jets
             
-            indices = np.arange(data.shape[0])
-            self.rng.shuffle(indices)
-            print("Loaded data was shuffled")
-            data = data[indices]
-            labels = labels[indices]
+            #indices = np.arange(data.shape[0])
+            #self.rng.shuffle(indices)
+            #print("Loaded data was shuffled")
+            #data = data[indices]
+            #labels = labels[indices]
             
             # Yield data in batches
             for i in range(0, len(data), self.batch_size):
@@ -220,10 +220,10 @@ class CASEDelphesJetDataset(IterableDataset):
                 batch_labels = labels[i:end]
                 
                 batch_data = torch.from_numpy(batch_data).float()
-                batch_labels = torch.from_numpy(batch_labels).float() # Assuming labels are floats
+                #batch_labels = torch.from_numpy(batch_labels).float() # Assuming labels are floats
                 
                 sample_counter += batch_data.shape[0]
-                yield np.array(batch_data,requires_grad=False), np.array(batch_labels,requires_grad=False)
+                yield np.array(batch_data,requires_grad=False), np.array(batch_labels,dtype=np.integer,requires_grad=False)
 
 def OneP1QDataLoader(input_shape:tuple[int]=(100, 3),train:bool=True,dataset='delphes',**kwargs) -> DataLoader:
     '''
@@ -290,6 +290,8 @@ class CASEJetClassDataset(CASEDelphesJetDataset):
                     print("Inferred: QCD like jets")
                 else:
                     truth_label = np.ones(jet_etaphipt.shape[0])
+        truth_label=np.array(truth_label,dtype=np.integer)
+
         if self.normalize_pt:
             print("Normalizing PFCand pT by jet pT")
             jet_etaphipt[...,self.pt_index]=jet_etaphipt[...,self.pt_index]/jet_pt[:,np.newaxis]
