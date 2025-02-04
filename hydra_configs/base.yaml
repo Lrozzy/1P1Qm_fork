@@ -3,6 +3,7 @@ base_dir: '/work/abal/qae_hep/'
 train: true
 dataset: 'delphes'
 wires: 4
+ancilla: False
 trash_qubits: 3
 shots: 2500
 train_n: 2000
