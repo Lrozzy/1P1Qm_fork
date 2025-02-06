@@ -1,0 +1,34 @@
+defaults:
+  - base
+
+seed: 'VQC_JC_SAMPLE_8Q'
+train: true
+wires: 8
+trash_qubits: 3
+shots: 2500
+train_n: 1000
+valid_n: 100
+batch_size: 1
+epochs: 40
+extra_weights: 16
+backend: 'autograd'
+device_name: 'lightning.kokkos'
+lr: 2.0e-3
+save: true
+flat: true
+num_layers: 1
+evictable: false
+resume: false
+desc: 'sample yaml for VQC, some arguments are redundant (e.g trash qubits, extra weights)'
+norm_pt: true
+lr_decay: true
+patience: 3
+loss: 'MSE'
+dataset: 'jetclass'
+improv: 0.1 # improvement in AUC
+save_dir: '/work/abal/qae_hep/saved_models/'
+data_dir: '/ceph/abal/QML/JetClass/'
+dump: '/ceph/abal/QML/JetClass/dumps/' # only for testing
+read_n: 2000 # only for testing
+load: false # only for testing
+log_wandb: false # only for testing
