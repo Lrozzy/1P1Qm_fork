@@ -41,7 +41,7 @@ def batch_semi_classical_cost(weights,inputs=None,quantum_circuit=None,return_fi
     batched_average_cost=100.*(np.array(cost,requires_grad=True).mean())#np.array([-quantum_circuit(weights,item) for item in inputs]).mean()
     return batched_average_cost
 
-def VQC_cost(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=False,val=False,loss_type='BCE'):
+def VQC_cost(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=False,loss_type='BCE'):
     bias=weights[-1]
     exp_vals=np.array(quantum_circuit(weights,inputs),requires_grad=True) # n_qubits x batch_size
     #exp_vals=0.5*(1+np.mean(exp_vals,axis=0,rquires_grad=True)) # reduce over the first axis, which is the number of wires
@@ -56,12 +56,10 @@ def VQC_cost(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=
     else:
         sys.exit(-1)
     if return_scores:
-        if val:
-            score=np.mean(exp_vals)
         return loss_fn, score
     return np.array(loss_fn,requires_grad=True)
 
-def probabilistic_loss(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=False,val=False,loss_type='BCE'):
+def probabilistic_loss(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=False,loss_type='BCE'):
     batch_size=len(labels)
     probs=np.array(quantum_circuit(weights,inputs),requires_grad=True) # n_qubits x batch_size
     
@@ -72,8 +70,6 @@ def probabilistic_loss(weights,inputs=None,quantum_circuit=None,labels=None,retu
     loss_fn=np.mean(scores)
         
     if return_scores:
-        if val:
-            score=np.mean(scores)
-        return loss_fn, score
+        return loss_fn, scores
     return np.array(loss_fn,requires_grad=True)
     
