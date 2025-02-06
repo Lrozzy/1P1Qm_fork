@@ -86,11 +86,11 @@ def main(cfg: DictConfig):
         cost_fn=loss.probabilistic_loss#loss.VQC_cost
     else:
         cost_fn=loss.VQC_cost
-    qAE = qc.QuantumClassifier(wires=cfg.wires, shots=cfg.shots,dev_name=cfg.device_name,layers=cfg.num_layers)
-    qAE.set_circuit()
+    VQC = qc.QuantumClassifier(wires=cfg.wires, shots=cfg.shots,dev_name=cfg.device_name,layers=cfg.num_layers)
+    VQC.set_circuit()
 
-    NUM_WEIGHTS = len(qc.auto_wires)*3*cfg.num_layers+1 # Extra weight for the bias term in VQC
-        
+    NUM_WEIGHTS = len(qc.auto_wires)*3*cfg.num_layers+3 # Extra weight for the bias term in VQC + scale factor for pT
+    
     if not cfg.resume:
         init_weights = qc.np.float64(qc.np.random.uniform(0, qc.np.pi, size=(NUM_WEIGHTS,), requires_grad=True))
 
@@ -127,7 +127,7 @@ def main(cfg: DictConfig):
     optimizer = qc.qml.AdamOptimizer(stepsize=cfg.lr)
 
     # Initialize the trainer with WandB
-    trainer = qc.QuantumTrainer(qAE, lr=cfg.lr, backend_name=cfg.backend, init_weights=init_weights, device_name=cfg.device_name,
+    trainer = qc.QuantumTrainer(VQC, lr=cfg.lr, backend_name=cfg.backend, init_weights=init_weights, device_name=cfg.device_name,
                                 train_max_n=train_max_n, valid_max_n=valid_max_n, epochs=cfg.epochs, batch_size=cfg.batch_size,
                                 logger=logger, save=cfg.save, patience=cfg.patience, optimizer=optimizer,improv=cfg.improv,\
                                       loss_fn=cost_fn,lr_decay=cfg.lr_decay, wandb=wandb,loss_type=cfg.loss)
