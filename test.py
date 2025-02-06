@@ -13,7 +13,7 @@ import case_reader as cr
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')
-from sklearn.metrics import roc_curve, roc_auc_score
+from sklearn.metrics import roc_curve, roc_auc_score, precision_recall_curve
 
 @hydra.main(config_path="./hydra_configs", config_name="config")
 def main(cfg: DictConfig):
@@ -242,9 +242,10 @@ def main(cfg: DictConfig):
     #costs=scaler.fit_transform(costs.reshape(-1,1)).flatten()
 
 
-    fpr,tpr,thresholds=roc_curve(labels,costs)
+    fpr,tpr,_=roc_curve(labels,costs)
     roc_auc=roc_auc_score(labels,costs)
-    
+    precision,recall,_ = precision_recall_curve(labels,costs)
+
     bins_qcd,edges_qcd=nnp.histogram(qcd_fids,density=True,bins=25,range=[90,100])
     bins_sig,edges_sig=nnp.histogram(sig_fids,density=True,bins=25,range=[90,100])
     plt.stairs(bins_qcd,edges_qcd,fill=True,label='QCD',alpha=0.6)
@@ -270,6 +271,15 @@ def main(cfg: DictConfig):
     plt.savefig(os.path.join(plot_dir,f'roc_curve_{cfg.signal}.png'))
 
     plt.clf()
+    plt.plot(recall,precision,label='AUC = %0.3f' % roc_auc)
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title(f'Precision-Recall: {ps.labels[cfg.signal]}')
+    plt.minorticks_on()
+    plt.grid(True,which='major',linestyle='--')
+    plt.legend(loc='lower right')
+    plt.savefig(os.path.join(plot_dir,f'precision_recall_curve_{cfg.signal}.png'))
+    
     # effs=nnp.arange(10,100,0.5)
     # sig_cuts=nnp.percentile(sig_costs,effs)
     # sig_cuts,idx=nnp.unique(sig_cuts,return_index=True)
