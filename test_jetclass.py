@@ -118,9 +118,8 @@ def main(cfg: DictConfig):
     
     fpr,tpr,thresholds=roc_curve(labels,scores)
     roc_auc=roc_auc_score(labels,scores)
-    precision,recall,_ = precision_recall_curve(labels,scores)
     plot_label=r'$t \rightarrow bq\overline{q}$'
-    import pdb;pdb.set_trace()
+    
     bins_qcd,edges_qcd=nnp.histogram(scores[labels==0],density=True,bins=50,range=[0,2])
     bins_sig,edges_sig=nnp.histogram(scores[labels==1],density=True,bins=50,range=[0,2])
     plt.stairs(bins_qcd,edges_qcd,fill=True,label='q/g jets',alpha=0.6)
@@ -144,16 +143,6 @@ def main(cfg: DictConfig):
     #plt.grid(True,which='major',linestyle='--')
     plt.legend(loc='lower right')
     plt.savefig(os.path.join(plot_dir,f'roc_curve.png'))
-    plt.clf()
-    plt.clf()
-    plt.plot(recall,precision,label='AUC = %0.3f' % roc_auc)
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.title(f'Precision-Recall: {plot_label} vs q/g jets')
-    plt.minorticks_on()
-    plt.grid(True,which='major',linestyle='--')
-    plt.legend(loc='lower right')
-    plt.savefig(os.path.join(plot_dir,f'precision_recall_curve.png'))
     plt.clf()
     sic=tpr/nnp.sqrt(fpr)
     plt.plot(tpr,sic)
