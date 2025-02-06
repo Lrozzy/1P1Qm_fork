@@ -5,16 +5,14 @@ import pathlib
 import glob,h5py
 
 # Other imports
-import quantum.losses as loss
 import numpy as nnp
 import helpers.utils as ut
 import helpers.path_setter as ps
-import case_reader as cr
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')
 import mplhep; mplhep.style.use("CMS")
-from sklearn.metrics import roc_curve, roc_auc_score
+from sklearn.metrics import roc_curve, roc_auc_score,precision_recall_curve
 
 @hydra.main(config_path="./hydra_configs", config_name="config")
 def main(cfg: DictConfig):
@@ -52,9 +50,14 @@ def main(cfg: DictConfig):
         cr_spec = importlib.util.spec_from_file_location('cr', os.path.join(save_dir, 'FROZEN_DATAREADER.py'))
         cr = importlib.util.module_from_spec(cr_spec)
         cr_spec.loader.exec_module(cr)
+        loss_spec = importlib.util.spec_from_file_location('loss', os.path.join(save_dir, 'FROZEN_LOSS.py'))
+        loss = importlib.util.module_from_spec(loss_spec)
+        loss_spec.loader.exec_module(loss)
         print("Successfully imported frozen architecture and dataloaders")
     except ImportError:
         import quantum.architectures as qc
+        import case_reader as cr
+        import quantum.losses as loss
         print("Failure: Frozen architecture not imported. Fetching generic architecture instead")
 
     # Load arguments and set up quantum autoencoder
@@ -89,7 +92,7 @@ def main(cfg: DictConfig):
         max_samples=cfg.read_n)
     
     if cfg.load:
-        with h5py.File(os.path.join(out_dir, 'results.h5'), 'r') as f:
+        with h5py.File(os.path.join(out_dir, 'qcd_results.h5'), 'r') as f:
             scores = f['scores'][()]
             costs = f['costs'][()]
             features = f['jetFeatures'][()]
@@ -115,11 +118,11 @@ def main(cfg: DictConfig):
     
     fpr,tpr,thresholds=roc_curve(labels,scores)
     roc_auc=roc_auc_score(labels,scores)
-
+    precision,recall,_ = precision_recall_curve(labels,scores)
     plot_label=r'$t \rightarrow bq\overline{q}$'
-    
-    bins_qcd,edges_qcd=nnp.histogram(scores[labels==0],density=True,bins=50,range=[0,1])
-    bins_sig,edges_sig=nnp.histogram(scores[labels==1],density=True,bins=50,range=[0,1])
+    import pdb;pdb.set_trace()
+    bins_qcd,edges_qcd=nnp.histogram(scores[labels==0],density=True,bins=50,range=[0,2])
+    bins_sig,edges_sig=nnp.histogram(scores[labels==1],density=True,bins=50,range=[0,2])
     plt.stairs(bins_qcd,edges_qcd,fill=True,label='q/g jets',alpha=0.6)
     plt.stairs(bins_sig,edges_sig,fill=False,label=plot_label)
     plt.minorticks_on()
@@ -142,7 +145,16 @@ def main(cfg: DictConfig):
     plt.legend(loc='lower right')
     plt.savefig(os.path.join(plot_dir,f'roc_curve.png'))
     plt.clf()
-    
+    plt.clf()
+    plt.plot(recall,precision,label='AUC = %0.3f' % roc_auc)
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title(f'Precision-Recall: {plot_label} vs q/g jets')
+    plt.minorticks_on()
+    plt.grid(True,which='major',linestyle='--')
+    plt.legend(loc='lower right')
+    plt.savefig(os.path.join(plot_dir,f'precision_recall_curve.png'))
+    plt.clf()
     sic=tpr/nnp.sqrt(fpr)
     plt.plot(tpr,sic)
     plt.xlabel('Signal efficiency')
