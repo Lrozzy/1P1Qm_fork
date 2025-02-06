@@ -10,6 +10,7 @@ import os,pathlib
 import helpers.utils as ut
 import subprocess
 from torch.utils.data import DataLoader
+from sklearn.metrics import roc_auc_score
 # Global variable initialization
 dev = None
 all_wires=None
@@ -97,7 +98,9 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     # State preparation for all wires
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
     # State preparation for all wires
-        
+    sf=weights[-2]
+    sfb=weights[-3]
+    
         # QAE Circuit
     for L in range(num_layers):
         for w in auto_wires:
@@ -109,21 +112,19 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
                 zenith=zenith.item()
                 azimuth=azimuth.item()
                 radius=radius.item()
-            qml.RY(zenith*radius, wires=w)
-            qml.RZ(radius*azimuth/2., wires=w)
+            #if L%2==0:
+            qml.RY((sf*radius+sfb)*zenith, wires=w)
+            qml.RZ((sf*radius+sfb)*azimuth, wires=w)
             #qml.RX(radius*np.pi, wires=w)
-            # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
-            # qml.RX(zenith/2., wires=w)   
-            # qml.RY(azimuth/2., wires=w)
-            # qml.RZ(radius*np.pi*2, wires=w)
-            #qml.U3(zenith/2., azimuth/2., radius*np.pi*2, wires=w)
+            # else:
+            #     qml.RX(radius*np.pi, wires=w)
             start=3*L*N
         
         for item in auto_wires: 
             qml.CNOT(wires=[item,(item+1)%N])  # ring of CNOTs
         
         # for item in two_comb_wires: 
-        #     qml.CRY(inputs[:,item[1],index['pt']],wires=item)  
+        #     qml.CNOT(wires=item)  
         
         for phi,theta,omega,i in zip(weights[start:start+N],weights[start+N:start+2*N],weights[start+2*N:start+3*N],auto_wires):
             qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
@@ -248,6 +249,12 @@ class QuantumClassifier:
         """
         dictionary=ut.Unpickle(model_path)
         self.current_weights=np.array(dictionary['weights'],requires_grad=train)
+    def print_weights(self):
+        """
+        Prints the current weights of the quantum autoencoder.
+        """
+        print('Current weights: \n\n',self.current_weights)
+
     def run_inference(self,data:np.ndarray=None,labels:np.ndarray=None,loss_fn:Callable=None,loss_type='BCE'):
         """
         Runs inference on the autoencoder circuit using the loaded weights.
@@ -307,7 +314,7 @@ class QuantumTrainer():
         self.improv=improv
         self.is_evictable=False
         self.wandb=wandb
-        self.history={'train':[],'val':[],'accuracy':[]}
+        self.history={'train':[],'val':[],'auc':[]}
         print (f'Performing optimization with: {self.optim} | Setting Learning rate: {lr}')
         print ('Backend:',self.backend,'\n')
 
@@ -328,7 +335,7 @@ class QuantumTrainer():
             return float(cost)
         else: 
             cost,scores=self.quantum_loss(self.current_weights,inputs=data, labels=labels, \
-                                          quantum_circuit=self.circuit,return_scores=True,val=True,loss_type=self.loss_type)
+                                          quantum_circuit=self.circuit,return_scores=True,loss_type=self.loss_type)
             return float(cost),float(scores)
     def is_evictable_job(self,seed:bool=None):
         """
@@ -361,9 +368,9 @@ class QuantumTrainer():
             
             losses=0.
             if (n_epoch>4):
-                recent_val_losses = self.history['val'][-3:]
-                previous_val_loss = self.history['val'][-4]
-                improvement = abs(np.mean(recent_val_losses) - previous_val_loss)
+                recent_val_metrics = self.history['auc'][-3:]
+                previous_val_metric = self.history['auc'][-4]
+                improvement = (np.mean(recent_val_metrics) - previous_val_metric)
 
                 if improvement < self.improv:
                     # Handle learning rate decay
@@ -403,27 +410,34 @@ class QuantumTrainer():
             ### Validation pass ###
             val_loss=0.
             val_batch_yield=0
-            val_score=0.
+            val_score=[]
+            val_labels=[]
             for data,labels in tqdm(val_loader,total=int(self.valid_max_n/self.batch_size)):
                 loss,score=self.iteration(data,labels=labels,train=False)
                 val_loss+=loss
-                val_score+=score
+                val_score.append(score)
+                val_labels.append(labels)
                 val_batch_yield+=1
             val_loss=val_loss/val_batch_yield
-            val_score=val_score/val_batch_yield
+            val_labels=np.array(val_labels).flatten()
+            val_score=np.array(val_score).flatten()
+            val_auc=roc_auc_score(val_labels,val_score)
+            
             if self.wandb is not None:
                 self.wandb.log({'val_loss': val_loss})
+                self.wandb.log({'val_auc': val_auc})
             #print (f'Epoch {n_epoch}: Train Loss:{train_loss} Val loss: {val_loss}')
             if n_epoch>0:
                 self.logger.info(f'Epoch {n_epoch}: Network with {len(auto_wires)} input qubits trained on {sample_counter} samples in {batch_yield} batches')
-                self.logger.info(f'Epoch {n_epoch}: Train Loss = {train_loss:.3f} | Val loss = {val_loss:.3f} | Val score = {val_score:.3f} \n Time taken = {end-start:.3f} seconds \n\n')
+                self.logger.info(f'Epoch {n_epoch}: Train Loss = {train_loss:.3f} | Val loss = {val_loss:.3f} | Val AUC = {val_auc:.3f} \n Time taken = {end-start:.3f} seconds \n\n')
                 
                 self.history['train'].append(train_loss)
 
             else:
                 self.logger.info(f'Initial validation pass completed')
-                self.logger.info(f'Epoch {n_epoch} (No training performed): Val loss = {val_loss:.3f} | Val score = {val_score:.3f}\n\n')
+                self.logger.info(f'Epoch {n_epoch} (No training performed): Val loss = {val_loss:.3f} | Val AUC = {val_auc:.3f}\n\n')
             self.history['val'].append(val_loss)
+            self.history['auc'].append(val_auc)
             if self.saving:
                 if (n_epoch==self.epochs):
                     name='trained_model.pickle'
