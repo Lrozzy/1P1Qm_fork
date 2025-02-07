@@ -9,6 +9,7 @@ import pennylane.numpy as np
 import os,pathlib
 import helpers.utils as ut
 import subprocess
+from quantum.losses import sigmoid
 from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score
 # Global variable initialization
@@ -98,8 +99,8 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     # State preparation for all wires
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
     # State preparation for all wires
-    sf=weights[-2]
-    sfb=weights[-3]
+    sf=2*np.pi*sigmoid(weights[-2])+1
+    #sfb=weights[-3]
     
         # QAE Circuit
     for L in range(num_layers):
@@ -113,8 +114,8 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
                 azimuth=azimuth.item()
                 radius=radius.item()
             #if L%2==0:
-            qml.RY((sf*radius+sfb)*zenith, wires=w)
-            qml.RZ((sf*radius+sfb)*azimuth, wires=w)
+            qml.RY(sf*radius*zenith, wires=w)
+            qml.RZ(sf*radius*azimuth, wires=w)
             #qml.RX(radius*np.pi, wires=w)
             # else:
             #     qml.RX(radius*np.pi, wires=w)
@@ -429,7 +430,8 @@ class QuantumTrainer():
             #print (f'Epoch {n_epoch}: Train Loss:{train_loss} Val loss: {val_loss}')
             if n_epoch>0:
                 self.logger.info(f'Epoch {n_epoch}: Network with {len(auto_wires)} input qubits trained on {sample_counter} samples in {batch_yield} batches')
-                self.logger.info(f'Epoch {n_epoch}: Train Loss = {train_loss:.3f} | Val loss = {val_loss:.3f} | Val AUC = {val_auc:.3f} \n Time taken = {end-start:.3f} seconds \n\n')
+                self.logger.info(f'Epoch {n_epoch}: Train Loss = {train_loss:.3f} | Val loss = {val_loss:.3f} \
+                | Val AUC = {val_auc:.3f} \n Time taken = {end-start:.3f} seconds \n\n')
                 
                 self.history['train'].append(train_loss)
 
