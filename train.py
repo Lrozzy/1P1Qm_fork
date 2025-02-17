@@ -72,6 +72,8 @@ def main(cfg: DictConfig):
         subprocess.run(['cp', os.path.join(base_dir,'case_reader.py'), tmpfile])
         tmpfile = os.path.join(save_dir, 'FROZEN_LOSS.py')
         subprocess.run(['cp', os.path.join(base_dir,'quantum/losses.py'), tmpfile])
+        # delete checkpoint directory contents
+        subprocess.run(['rm', os.path.join(save_dir, 'checkpoints','*')])
         
         
     logger.info(f"Feature are scaled to the following limits: {ut.feature_limits}")
@@ -88,12 +90,19 @@ def main(cfg: DictConfig):
         cost_fn=loss.VQC_cost
     VQC = qc.QuantumClassifier(wires=cfg.wires, shots=cfg.shots,dev_name=cfg.device_name,layers=cfg.num_layers)
     VQC.set_circuit()
+    if cfg.extra_weights>4:
+        print("No. of extra weights = ",cfg.extra_weights)
+        print("Are you sure? Press ctrl+c to cancel within 5s")
+        time.sleep(5)
 
-    NUM_WEIGHTS = len(qc.auto_wires)*3*cfg.num_layers+3 # Extra weight for the bias term in VQC + scale factor for pT
+    NUM_WEIGHTS = len(qc.auto_wires)*3*cfg.num_layers+cfg.extra_weights # Extra weight for the bias term in VQC + scale factor for pT
     
     if not cfg.resume:
         init_weights = qc.np.float64(qc.np.random.uniform(0, qc.np.pi, size=(NUM_WEIGHTS,), requires_grad=True))
-
+        #init_weights = qc.np.ones((NUM_WEIGHTS,), requires_grad=True)*qc.np.pi/2.
+        #init_weights[-cfg.extra_weights:]=qc.np.pi/2.
+        #init_weights[-1]=0.
+        #init_weights[-1]=0.0
     train_max_n = cfg.train_n
     valid_max_n = cfg.valid_n
     

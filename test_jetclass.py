@@ -2,7 +2,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import os
 import pathlib
-import glob,h5py
+import glob,h5py,sys
 
 # Other imports
 import numpy as nnp
@@ -58,29 +58,42 @@ def main(cfg: DictConfig):
         import quantum.architectures as qc
         import case_reader as cr
         import quantum.losses as loss
+        sys.exit(0)
         print("Failure: Frozen architecture not imported. Fetching generic architecture instead")
 
     # Load arguments and set up quantum autoencoder
     
+        
 
     norm_pt = cfg.norm_pt
 
-    qClassifier = qc.QuantumClassifier(wires=cfg.wires, dev_name=cfg.device_name, test=True)
+    qClassifier = qc.QuantumClassifier(wires=cfg.wires, dev_name=cfg.device_name, test=True,layers=cfg.num_layers)
     qClassifier.set_circuit()
     qc.print_training_params()
-    cost_fn=loss.VQC_cost
+    cost_fn=loss.batched_VQC_cost
     
-
     # Load model weights
     try:
         model_path = os.path.join(save_dir, 'trained_model.pickle')
         assert os.path.isfile(model_path), 'Model not found at: ' + model_path
     except:
-        print(f"Trained model not found at {model_path}. Will load the most recent checkpoint instead.")
+        #history=ut.Unpickle(os.path.join(save_dir, 'history.pickle'))
+        #val_auc=history['auc']
+        #best_model=sorted(glob.glob(os.path.join(save_dir, 'checkpoints', 'ep*.pickle')))[nnp.argmax(val_auc)-1]
+        #print(f"Trained model not found at {model_path}. Will load the most recent checkpoint instead.")
         model_path = sorted(glob.glob(os.path.join(save_dir, 'checkpoints', 'ep*.pickle')))[-1]
-    finally:
-        qClassifier.load_weights(model_path)
-        print(f"Successfully loaded model at {model_path}")
+        print(f"Trained model not found at {model_path}. Will load the best model")
+        #model_path = best_model
+    
+    if cfg.load_best:
+        history=ut.Unpickle(os.path.join(save_dir, 'history.pickle'))
+        val_auc=history['auc']
+        best_model=sorted(glob.glob(os.path.join(save_dir, 'checkpoints', 'ep*.pickle')))[nnp.argmax(val_auc)-1]
+        model_path = best_model
+    qClassifier.load_weights(model_path)
+    
+
+    print(f"Successfully loaded model at {model_path}")
 
     # Load test data
     paths = ps.PathSetter(data_path=cfg.data_dir)
@@ -115,10 +128,11 @@ def main(cfg: DictConfig):
             f.create_dataset('costs', data=costs)
             f.create_dataset('truth_labels', data=labels)
         
-    
     fpr,tpr,thresholds=roc_curve(labels,scores)
     roc_auc=roc_auc_score(labels,scores)
+    print(f'AUC={roc_auc:.3f}')
     plot_label=r'$t \rightarrow bq\overline{q}$'
+    import pdb;pdb.set_trace()
     
     bins_qcd,edges_qcd=nnp.histogram(scores[labels==0],density=True,bins=50,range=[0,2])
     bins_sig,edges_sig=nnp.histogram(scores[labels==1],density=True,bins=50,range=[0,2])
@@ -151,7 +165,14 @@ def main(cfg: DictConfig):
     plt.xlim(0.1,1)
     plt.title(f'SIC: {plot_label} vs q/g jets')
     plt.savefig(os.path.join(plot_dir,f'SIC.png'))
-    
+    plt.clf()
+    plt.plot(tpr,1./fpr,label='Rej$_{X}$')
+    plt.xlabel('TPR')
+    plt.ylabel('1/FPR')
+    plt.yscale('log')
+    plt.title(f'Rejection vs Signal Efficiency: {plot_label} vs q/g jets')
+    plt.legend()
+    plt.savefig(os.path.join(plot_dir,f'rejection.png'))
     if log_wandb:
         for filename in glob.glob(os.path.join(plot_dir, "*.png")):
             wandb.log({os.path.split(filename)[-1].replace('*.png',''): wandb.Image(filename)})
