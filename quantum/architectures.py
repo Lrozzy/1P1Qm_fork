@@ -9,7 +9,7 @@ import pennylane.numpy as np
 import os,pathlib
 import helpers.utils as ut
 import subprocess
-from quantum.losses import sigmoid
+from quantum.math_functions import sigmoid
 from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score
 # Global variable initialization
