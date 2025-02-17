@@ -101,6 +101,8 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     # State preparation for all wires
     sf=2*np.pi*sigmoid(weights[-2])+1
     #sfb=weights[-3]
+    # for w in auto_wires:
+    #     qml.PauliX(wires=w)
     
         # QAE Circuit
     for L in range(num_layers):
@@ -113,32 +115,34 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
                 zenith=zenith.item()
                 azimuth=azimuth.item()
                 radius=radius.item()
-            #if L%2==0:
             qml.RY(sf*radius*zenith, wires=w)
             qml.RZ(sf*radius*azimuth, wires=w)
+            #qml.RY(azimuth,wires=w)
+            #qml.CRX(radius*np.pi,wires=[w,(w+1)%N])
             #qml.RX(radius*np.pi, wires=w)
-            # else:
-            #     qml.RX(radius*np.pi, wires=w)
-            start=3*L*N
+        start=3*L*N
         
-        for item in auto_wires: 
-            qml.CNOT(wires=[item,(item+1)%N])  # ring of CNOTs
-        
-        # for item in two_comb_wires: 
-        #     qml.CNOT(wires=item)  
-        
-        for phi,theta,omega,i in zip(weights[start:start+N],weights[start+N:start+2*N],weights[start+2*N:start+3*N],auto_wires):
-            qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+        for w in auto_wires: 
+            #qml.Hadamard(wires=item)
+            qml.CNOT(wires=[w,(w+1)%N])  # ring of CNOTs
 
+        for phi,theta,omega,w in zip(weights[start:start+N],weights[start+N:start+2*N],weights[start+2*N:start+3*N],auto_wires):
+            qml.Rot(phi,theta,omega,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+            #qml.RX(phi,wires=w)
+            # qml.RY(phi,wires=[i])
+            # qml.RZ(omega,wires=[i])
         
     # for item in two_comb_wires: 
     #     qml.CZ(wires=item)
-    
+    #qml.QubitSum(wires=[2,1,0])
+    #qml.QubitSum(wires=[5,4,3])
+    #qml.QubitSum(wires=[7,6,5])
     
     #expectation_values = [qml.expval(qml.PauliZ(i)) for i in auto_wires] 
     #return expectation_values # expectation value of the first qubit, bounded in [0,1.0] plus a bias term
-    #fidelities = [qml.expval(qml.PauliZ(i)) for i in ancillary_wires]
-    return qml.expval(qml.PauliZ(0))
+    #fidelities = [qml.expval(qml.PauliZ(i)) for i in auto_wires]
+    #return qml.expval(qml.PauliZ(0)@qml.PauliZ(1))
+    return qml.expval(qml.PauliZ(0)@qml.PauliZ(1))  
     #return qml.probs(0)
 
 def ancilla_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
@@ -156,6 +160,7 @@ def ancilla_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) ->
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
     # State preparation for all wires
         # QAE Circuit
+    
     for L in range(num_layers):
         for w in auto_wires:
         # Variables named according to spherical coordinate system, it's easier to understand :)
@@ -269,7 +274,7 @@ class QuantumClassifier:
             Tuple[float, float]: Inference MSE loss and classifier scores.
         """
 
-        print("Running in inference mode \n No batching will be performed so don't expect a progress bar")
+        #print("Running in inference mode \n No batching will be performed so don't expect a progress bar")
         if self.current_weights is None:
             raise ValueError('Weights not initialized. Load a model first by calling load_weights(model_path)')       
         costs,scores=loss_fn(self.current_weights,inputs=data,labels=labels,quantum_circuit=self.circuit,return_scores=True,loss_type=loss_type)
@@ -333,10 +338,12 @@ class QuantumTrainer():
         if train:
             self.current_weights, cost = self.optim.step_and_cost(self.quantum_loss,self.current_weights,\
                                                                   inputs=data, labels=labels, quantum_circuit=self.circuit,loss_type=self.loss_type)
+            #print(grads.shape)
             return float(cost)
         else: 
             cost,scores=self.quantum_loss(self.current_weights,inputs=data, labels=labels, \
                                           quantum_circuit=self.circuit,return_scores=True,loss_type=self.loss_type)
+            
             return float(cost),float(scores)
     def is_evictable_job(self,seed:bool=None):
         """
@@ -362,6 +369,7 @@ class QuantumTrainer():
         self.print_params('Initial weights: ')
         n_decays=0
         last_decay=0
+        COMPLETE=False
         for n_epoch in tqdm(range(self.epochs+1)):
             sample_counter=0
             batch_yield=0
@@ -369,14 +377,14 @@ class QuantumTrainer():
             
             losses=0.
             if (n_epoch>4):
-                recent_val_metrics = self.history['auc'][-3:]
-                previous_val_metric = self.history['auc'][-4]
+                recent_val_metrics = self.history['auc'][-2:]
+                previous_val_metric = self.history['auc'][-3]
                 improvement = (np.mean(recent_val_metrics) - previous_val_metric)
 
                 if improvement < self.improv:
                     # Handle learning rate decay
                     if self.lr_decay:
-                        if (n_decays < self.patience) and ((n_epoch - last_decay) >= 3):
+                        if (n_decays < self.patience) and ((n_epoch - last_decay) >= 2):
                             last_decay = self.current_epoch
                             n_decays += 1
                             self.optim.stepsize *= 0.5  # Use a parameter if needed
@@ -384,11 +392,13 @@ class QuantumTrainer():
                         elif n_decays >= self.patience:
                             self.logger.info(f"\n\n No improvement over last 3 epochs and {self.patience} decay steps. Early stopping! \n\n")
                             self.save(self.save_dir, name='trained_model.pickle')
+                            COMPLETE=True
                             break
                     else:
                         # Early stopping without decay
                         self.logger.info(f"\n\n No improvement over last 3 epochs. Early stopping! \n\n")
                         self.save(self.save_dir, name='trained_model.pickle')
+                        COMPLETE=True
                         break
                     
             if n_epoch>0:
@@ -423,21 +433,23 @@ class QuantumTrainer():
             val_labels=np.array(val_labels).flatten()
             val_score=np.array(val_score).flatten()
             val_auc=roc_auc_score(val_labels,val_score)
-            
+            print("Val shape:", val_score.shape)
+            val_std=np.std(val_score)
+            val_score=np.mean(val_score)
             if self.wandb is not None:
                 self.wandb.log({'val_loss': val_loss})
                 self.wandb.log({'val_auc': val_auc})
             #print (f'Epoch {n_epoch}: Train Loss:{train_loss} Val loss: {val_loss}')
             if n_epoch>0:
                 self.logger.info(f'Epoch {n_epoch}: Network with {len(auto_wires)} input qubits trained on {sample_counter} samples in {batch_yield} batches')
-                self.logger.info(f'Epoch {n_epoch}: Train Loss = {train_loss:.3f} | Val loss = {val_loss:.3f} \
+                self.logger.info(f'Epoch {n_epoch}: Train Loss = {train_loss:.3f} | Val loss = {val_loss:.3f} | Val preds mean and std = {val_score:.3f} , {val_std:.3f}\
                 | Val AUC = {val_auc:.3f} \n Time taken = {end-start:.3f} seconds \n\n')
                 
                 self.history['train'].append(train_loss)
 
             else:
                 self.logger.info(f'Initial validation pass completed')
-                self.logger.info(f'Epoch {n_epoch} (No training performed): Val loss = {val_loss:.3f} | Val AUC = {val_auc:.3f}\n\n')
+                self.logger.info(f'Epoch {n_epoch} (No training performed): Val loss = {val_loss:.3f} | Val AUC = {val_auc:.3f} | Val preds mean and std = {val_score:.3f} , {val_std:.3f}\n\n')
             self.history['val'].append(val_loss)
             self.history['auc'].append(val_auc)
             if self.saving:
@@ -459,6 +471,9 @@ class QuantumTrainer():
                     except:
                         print("Failed to copy over checkpoints")
                         pass
+        if not COMPLETE:
+            # pickle the history
+            ut.Pickle(self.history,'history.pickle',path=self.save_dir)
         return self.history
     
     def print_params(self,prefix: Optional[str]=None) -> None:
@@ -542,4 +557,5 @@ class QuantumTrainer():
                                     validation losses and accuracies.
         """
         return self.history
+
 
