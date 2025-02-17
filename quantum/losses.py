@@ -1,19 +1,7 @@
 import pennylane.numpy as np
-import sys
-def mean_squared_error(predictions,targets):
-    return np.mean((predictions-targets)**2)
+import sys,tqdm
+import quantum.math_functions as mfunc
 
-def binary_cross_entropy(labels, probs,bias=None):
-    # Ensure that probabilities are bounded between (0, 1)
-    probs = np.clip(probs, 1e-15, 1 - 1e-15)  # Avoid log(0) which would cause issues
-    # Compute Binary Cross-Entropy
-    loss = -np.mean(labels * np.log(probs) + (1 - labels) * np.log(1 - probs))
-    # if bias is not None:
-    #     loss+=bias
-    return loss
-
-def sigmoid(x):
-    return 1/(1+np.exp(-x))
 
 def semi_classical_cost(weights,inputs=None,quantum_circuit=None,return_fid=False):
     if return_fid:
@@ -41,23 +29,52 @@ def batch_semi_classical_cost(weights,inputs=None,quantum_circuit=None,return_fi
     batched_average_cost=100.*(np.array(cost,requires_grad=True).mean())#np.array([-quantum_circuit(weights,item) for item in inputs]).mean()
     return batched_average_cost
 
-def VQC_cost(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=False,loss_type='BCE'):
+def VQC_cost(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=False,loss_type='BCE',reg=0.25):
     bias=weights[-1]
-    exp_vals=np.array(quantum_circuit(weights,inputs),requires_grad=True) # n_qubits x batch_size
-    #exp_vals=0.5*(1+np.mean(exp_vals,axis=0,rquires_grad=True)) # reduce over the first axis, which is the number of wires
-    #score = expvals
-    score=(exp_vals+bias)
-    #score=1+0.5*exp_vals#+bias
+    #k1=weights[-3]
+    #k2=weights[-3]
+    exp_vals=quantum_circuit(weights,inputs)#,requires_grad=True) # n_qubits x batch_size
     
     if loss_type=='BCE':
-        loss_fn=binary_cross_entropy(labels,score)
+        score=mfunc.sigmoid(10*exp_vals)#bias+
+        loss_fn=mfunc.binary_cross_entropy(labels,score)
     elif loss_type=='MSE':
-        loss_fn=mean_squared_error(labels,score)
+        score=exp_vals+bias
+        #score=transform(score,k1=k1)
+        score=mfunc.double_sided_leaky_relu(score)
+        loss_fn=mfunc.mean_squared_error(labels,score)#+reg*score*(1-score)
     else:
         sys.exit(-1)
     if return_scores:
         return loss_fn, score
     return np.array(loss_fn,requires_grad=True)
+
+def batched_VQC_cost(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=False,loss_type='BCE',reg=0.25):
+    bias=weights[-1]
+    #k1=weights[-3]
+    #k2=weights[-3]
+    loss_fn=[]
+    scores=[]
+    for input,label in tqdm.tqdm(zip(inputs,labels),total=len(inputs)):
+        exp_vals=np.array(quantum_circuit(weights,input[None,...]),requires_grad=True) # n_qubits x batch_size
+    
+        if loss_type=='BCE':
+            score=mfunc.sigmoid(10*exp_vals)#+bias
+            scores.append(score)
+            loss_fn.append(mfunc.binary_cross_entropy(label,score))
+        elif loss_type=='MSE':
+            score=exp_vals+bias
+            score=mfunc.double_sided_leaky_relu(score)
+            #score=transform(score,k1=k1)
+            scores.append(score)
+            loss_fn.append(mfunc.mean_squared_error(label,score))#+reg*score*(1-score))
+        else:
+            sys.exit(-1)
+    loss_fn=np.array(loss_fn,requires_grad=False)
+    score=np.array(scores,requires_grad=False)
+    if return_scores:
+        return loss_fn, score
+    return np.mean(loss_fn)
 
 def probabilistic_loss(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=False,loss_type='BCE'):
     batch_size=len(labels)
