@@ -34,3 +34,5 @@ read_n: 2000 # only for testing
 load: false # only for testing
 scheme: 'min' # only for testing
 log_wandb: false # only for testing
+load_best: false # only for testing
+circuit_type: 'normal'
