@@ -2,14 +2,13 @@
 from typing import Optional, Callable, Union, List, Dict, Tuple, Any
 import pennylane as qml
 from helpers.utils import getIndex
-from itertools import combinations, product
+from itertools import combinations
 import time
 from tqdm import tqdm
 import pennylane.numpy as np
 import os,pathlib
 import helpers.utils as ut
 import subprocess
-from quantum.math_functions import sigmoid
 from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score
 # Global variable initialization
@@ -25,6 +24,9 @@ num_layers = None
 index = None
 n_trash_qubits = -1
 SEPARATE_ANCILLA=False
+
+def sigmoid(x):
+    return 1/(1+np.exp(-x))
 
 def initialize(wires:int=4,layers:int=1,use_ancilla=False):
     """
@@ -85,6 +87,7 @@ def print_training_params()->None:
     time.sleep(3)
     print("LETS GOOOOOOOOOOOOO")
     time.sleep(1)
+
 def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     """
     Defines the quantum autoencoder (QAE) circuit using provided weights and inputs.
@@ -117,35 +120,19 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
                 radius=radius.item()
             qml.RY(sf*radius*zenith, wires=w)
             qml.RZ(sf*radius*azimuth, wires=w)
-            #qml.RY(azimuth,wires=w)
-            #qml.CRX(radius*np.pi,wires=[w,(w+1)%N])
-            #qml.RX(radius*np.pi, wires=w)
+            
         start=3*L*N
         
-        for w in auto_wires: 
-            #qml.Hadamard(wires=item)
+        for w in auto_wires:
             qml.CNOT(wires=[w,(w+1)%N])  # ring of CNOTs
 
         for phi,theta,omega,w in zip(weights[start:start+N],weights[start+N:start+2*N],weights[start+2*N:start+3*N],auto_wires):
             qml.Rot(phi,theta,omega,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
-            #qml.RX(phi,wires=w)
-            # qml.RY(phi,wires=[i])
-            # qml.RZ(omega,wires=[i])
-        
-    # for item in two_comb_wires: 
-    #     qml.CZ(wires=item)
-    #qml.QubitSum(wires=[2,1,0])
-    #qml.QubitSum(wires=[5,4,3])
-    #qml.QubitSum(wires=[7,6,5])
-    
-    #expectation_values = [qml.expval(qml.PauliZ(i)) for i in auto_wires] 
-    #return expectation_values # expectation value of the first qubit, bounded in [0,1.0] plus a bias term
-    #fidelities = [qml.expval(qml.PauliZ(i)) for i in auto_wires]
-    #return qml.expval(qml.PauliZ(0)@qml.PauliZ(1))
-    return qml.expval(qml.PauliZ(0)@qml.PauliZ(1))  
-    #return qml.probs(0)
+            
+    return qml.expval(qml.PauliZ(0))  
 
-def ancilla_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
+
+def QCNN(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     """
     Defines the quantum autoencoder (QAE) circuit using provided weights and inputs.
 
@@ -154,48 +141,48 @@ def ancilla_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) ->
         inputs (np.ndarray): Input data to be used in the circuit. Defaults to None.
 
     Returns:
-        Any: Expected value of Pauli-Z tensor of 1st qubit
+        Any: Expected value of Pauli-Z tensor product on the ancillary qubits.
     """
     # State preparation for all wires
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
     # State preparation for all wires
+    sf=2*np.pi*sigmoid(weights[-2])+1
+    #sfb=weights[-3]
+    # for w in auto_wires:
+    #     qml.PauliX(wires=w)
+    
         # QAE Circuit
-    
-    for L in range(num_layers):
-        for w in auto_wires:
-        # Variables named according to spherical coordinate system, it's easier to understand :)
-            zenith = inputs[:,w, index['eta']] # corresponding to eta
-            azimuth = inputs[:,w, index['phi']] # corresponding to phi
-            radius = inputs[:,w, index['pt']] # corresponding to pt
-            qml.RZ(azimuth/2., wires=w)
-            qml.RY(zenith, wires=w)
-            qml.RX(radius*np.pi, wires=w)
-            # Apply rotation gates modulated by the radius (pt) of the particle, which has been scaled to the range [0,1]
-            # qml.RX(zenith/2., wires=w)   
-            # qml.RY(azimuth/2., wires=w)
-            # qml.RZ(radius*np.pi*2, wires=w)
-            #qml.U3(zenith/2., azimuth/2., radius*np.pi*2, wires=w)
-        start=3*L*N
+    for w in auto_wires:
+    # Variables named according to spherical coordinate system, it's easier to understand :)
+        zenith = np.squeeze(inputs[:,w, index['eta']]) # corresponding to eta
+        azimuth = np.squeeze(inputs[:,w, index['phi']]) # corresponding to phi
+        radius = np.squeeze(inputs[:,w, index['pt']]) # corresponding to pt
+        if inputs.shape[0]==1:
+            zenith=zenith.item()
+            azimuth=azimuth.item()
+            radius=radius.item()
+        qml.RY(sf*radius*zenith, wires=w)
+        qml.RZ(sf*radius*azimuth, wires=w)
+            
         
-        for item in two_comb_wires: 
-            qml.CNOT(wires=item)  
-        
-        for item in two_comb_wires: 
-            qml.CRY(inputs[:,item[1],index['pt']],wires=item)  
-        
-        for phi,theta,omega,i in zip(weights[start:start+N],weights[start+N:start+2*N],weights[start+2*N:start+3*N],auto_wires):
-            qml.Rot(phi,theta,omega,wires=[i]) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+    for w in auto_wires:
+        qml.CY(wires=[w,(w+1)%N])  # ring of CNOTs
 
-        
-    # for item in two_comb_wires: 
-    #     qml.CZ(wires=item)
-    
-    
-    #expectation_values = [qml.expval(qml.PauliZ(i)) for i in auto_wires] 
-    #return expectation_values # expectation value of the first qubit, bounded in [0,1.0] plus a bias term
-    #fidelities = [qml.expval(qml.PauliZ(i)) for i in ancillary_wires]
-    return qml.expval(qml.PauliZ(0))
-    #return qml.sum(*fidelities) / len(ancillary_wires)
+    for L in range(num_layers):
+        phi=weights[2*L]
+        theta=weights[2*L+1]
+        #omega=weights[3*L+2]
+        for w in auto_wires[:-(1+L)]:
+            
+            qml.RZ(phi,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+            qml.RY(theta,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+            qml.RZ(phi,wires=(w+L+1)%N) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+            qml.RY(theta,wires=(w+L+1)%N) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+            qml.CNOT(wires=[w,(w+1+L)%N])  # ring of CNOTs
+            
+    return [qml.expval(qml.PauliZ(i)) for i in auto_wires]  
+
+
 
 
 class QuantumClassifier:
@@ -218,13 +205,16 @@ class QuantumClassifier:
         self.circuit = None
         self.ancilla = ancilla
         if test: self.set_circuit() # Set the circuit for inference
-    def set_circuit(self,ancilla=False)->None:
+    def set_circuit(self,circuit_type='normal')->None:
         """
         Configures the QNode circuit for the quantum autoencoder.
 
         """
-        if ancilla:
-            self.circuit=qml.QNode(ancilla_circuit,self.device,interface=self.backend)
+        if circuit_type=='CNN':
+            print("Using CNN circuit with no. of conv layers = no. of qubits (for now)")
+            print("Things might be slow")
+            time.sleep(2)
+            self.circuit=qml.QNode(QCNN,self.device,interface=self.backend)
         else:
             self.circuit = qml.QNode(circuit,self.device,interface=self.backend)
     def fetch_circuit(self) -> qml.QNode:
