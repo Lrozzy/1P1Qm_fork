@@ -89,14 +89,17 @@ def main(cfg: DictConfig):
     else:
         cost_fn=loss.VQC_cost
     VQC = qc.QuantumClassifier(wires=cfg.wires, shots=cfg.shots,dev_name=cfg.device_name,layers=cfg.num_layers)
-    VQC.set_circuit()
+    VQC.set_circuit(circuit_type=cfg.circuit_type)
+
     if cfg.extra_weights>4:
         print("No. of extra weights = ",cfg.extra_weights)
         print("Are you sure? Press ctrl+c to cancel within 5s")
         time.sleep(5)
 
     NUM_WEIGHTS = len(qc.auto_wires)*3*cfg.num_layers+cfg.extra_weights # Extra weight for the bias term in VQC + scale factor for pT
-    
+    if cfg.circuit_type=='CNN':
+        NUM_WEIGHTS = 2*cfg.num_layers+cfg.extra_weights
+
     if not cfg.resume:
         init_weights = qc.np.float64(qc.np.random.uniform(0, qc.np.pi, size=(NUM_WEIGHTS,), requires_grad=True))
         #init_weights = qc.np.ones((NUM_WEIGHTS,), requires_grad=True)*qc.np.pi/2.
