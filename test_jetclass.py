@@ -16,9 +16,7 @@ from sklearn.metrics import roc_curve, roc_auc_score,precision_recall_curve
 
 @hydra.main(config_path="./hydra_configs", config_name="config")
 def main(cfg: DictConfig):
-    scheme = cfg.scheme
     log_wandb=cfg.log_wandb
-
     # Set up directories
     save_dir = os.path.join(cfg.save_dir, cfg.seed)
     dump_dir=cfg.dump
@@ -54,13 +52,14 @@ def main(cfg: DictConfig):
         loss = importlib.util.module_from_spec(loss_spec)
         loss_spec.loader.exec_module(loss)
         print("Successfully imported frozen architecture and dataloaders")
-    except ImportError:
+    except ImportError as e:
+        print(e)
         import quantum.architectures as qc
         import case_reader as cr
         import quantum.losses as loss
-        sys.exit(0)
         print("Failure: Frozen architecture not imported. Fetching generic architecture instead")
-
+        sys.exit(0)
+        
     # Load arguments and set up quantum autoencoder
     
         
