@@ -16,8 +16,7 @@ def binary_cross_entropy(labels, probs,bias=None):
 def transform(x,k1=1.0):
     return 0.5*(1+(2./np.pi)*np.arctan(k1*x))
 
-def sigmoid(x):
-    return 1/(1+np.exp(-x))
+
 
 def double_sided_leaky_relu(x):
     return np.where(x < 0, 0.1 * x, np.where(x > 1, 0.9+0.1*x, x))
