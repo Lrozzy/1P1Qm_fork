@@ -131,7 +131,7 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
             qml.Rot(0.,theta,omega,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
             qml.RX(phi,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
             
-    return qml.expval(qml.PauliZ(0)@qml.PauliZ(1))  
+    return qml.expval(qml.PauliZ(0))  
 
 
 def QCNN(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
