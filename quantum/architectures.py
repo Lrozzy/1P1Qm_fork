@@ -120,7 +120,7 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
                 azimuth=azimuth.item()
                 radius=radius.item()
             qml.RY(sf*radius*zenith, wires=w)
-            qml.RZ(sf*radius*azimuth, wires=w)
+            qml.RX(sf*radius*azimuth, wires=w)
             
         start=3*L*N
         
@@ -128,7 +128,8 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
             qml.CNOT(wires=[w,(w+1)%N])  # ring of CNOTs
 
         for phi,theta,omega,w in zip(weights[start:start+N],weights[start+N:start+2*N],weights[start+2*N:start+3*N],auto_wires):
-            qml.Rot(phi,theta,omega,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+            qml.Rot(0.,theta,omega,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+            qml.RX(phi,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
             
     return qml.expval(qml.PauliZ(0)@qml.PauliZ(1))  
 
