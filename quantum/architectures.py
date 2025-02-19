@@ -103,6 +103,7 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
     # State preparation for all wires
     sf=2*np.pi*sigmoid(weights[-2])+1
+    #sf=sigmoid(weights[-2])
     #sfb=weights[-3]
     # for w in auto_wires:
     #     qml.PauliX(wires=w)
@@ -118,8 +119,8 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
                 zenith=zenith.item()
                 azimuth=azimuth.item()
                 radius=radius.item()
-            qml.RY(sf*radius*zenith, wires=w)
-            qml.RZ(sf*radius*azimuth, wires=w)
+            qml.RX(sf*radius*zenith, wires=w)
+            qml.RY(sf*radius*azimuth, wires=w)
             
         start=3*L*N
         
@@ -129,7 +130,7 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
         for phi,theta,omega,w in zip(weights[start:start+N],weights[start+N:start+2*N],weights[start+2*N:start+3*N],auto_wires):
             qml.Rot(phi,theta,omega,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
             
-    return qml.expval(qml.PauliZ(0))  
+    return qml.expval(qml.PauliZ(0)@qml.PauliZ(1))  
 
 
 def QCNN(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
