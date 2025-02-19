@@ -131,7 +131,10 @@ def main(cfg: DictConfig):
     roc_auc=roc_auc_score(labels,scores)
     print(f'AUC={roc_auc:.3f}')
     plot_label=r'$t \rightarrow bq\overline{q}$'
-    import pdb;pdb.set_trace()
+    pathlib.Path(os.path.join(plot_dir,'ROC_data')).mkdir(parents=True, exist_ok=True)
+    npz_path = os.path.join(plot_dir, 'ROC_data', 'FPR_TPR.npz')
+    nnp.savez(npz_path, fpr=fpr, tpr=tpr,auc=roc_auc,thresholds=thresholds)
+    print(f"ROC curve data saved to {npz_path}")
     
     bins_qcd,edges_qcd=nnp.histogram(scores[labels==0],density=True,bins=50,range=[0,2])
     bins_sig,edges_sig=nnp.histogram(scores[labels==1],density=True,bins=50,range=[0,2])
@@ -175,8 +178,8 @@ def main(cfg: DictConfig):
     if log_wandb:
         for filename in glob.glob(os.path.join(plot_dir, "*.png")):
             wandb.log({os.path.split(filename)[-1].replace('*.png',''): wandb.Image(filename)})
-
-        # Finish WandB run
+        wandb.log({'test_AUC':roc_auc})
         wandb.finish()
+
 if __name__ == "__main__":
     main()
