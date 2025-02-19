@@ -119,8 +119,8 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
                 zenith=zenith.item()
                 azimuth=azimuth.item()
                 radius=radius.item()
-            qml.RX(sf*radius*zenith, wires=w)
-            qml.RY(sf*radius*azimuth, wires=w)
+            qml.RY(sf*radius*zenith, wires=w)
+            qml.RZ(sf*radius*azimuth, wires=w)
             
         start=3*L*N
         
