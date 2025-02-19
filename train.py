@@ -73,8 +73,10 @@ def main(cfg: DictConfig):
         tmpfile = os.path.join(save_dir, 'FROZEN_LOSS.py')
         subprocess.run(['cp', os.path.join(base_dir,'quantum/losses.py'), tmpfile])
         # delete checkpoint directory contents
-        subprocess.run(['rm', os.path.join(save_dir, 'checkpoints','*')])
-        
+        try:
+            subprocess.run(['rm','-r', os.path.join(save_dir, 'checkpoints')])
+        except:
+            pass
         
     logger.info(f"Feature are scaled to the following limits: {ut.feature_limits}")
 
