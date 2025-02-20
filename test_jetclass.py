@@ -90,8 +90,7 @@ def main(cfg: DictConfig):
         best_model=sorted(glob.glob(os.path.join(save_dir, 'checkpoints', 'ep*.pickle')))[nnp.argmax(val_auc)-1]
         model_path = best_model
     qClassifier.load_weights(model_path)
-    
-
+     
     print(f"Successfully loaded model at {model_path}")
 
     # Load test data
