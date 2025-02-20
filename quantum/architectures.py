@@ -103,7 +103,7 @@ def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
     # State preparation for all wires
     sf=2*np.pi*sigmoid(weights[-2])+1
-    #sf=sigmoid(weights[-2])
+    #sf=0.5+sigmoid(weights[-2])
     #sfb=weights[-3]
     # for w in auto_wires:
     #     qml.PauliX(wires=w)
