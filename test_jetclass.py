@@ -2,7 +2,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import os
 import pathlib
-import glob,h5py,sys
+import glob,h5py,sys,json
 
 # Other imports
 import numpy as nnp
@@ -129,12 +129,17 @@ def main(cfg: DictConfig):
     fpr,tpr,thresholds=roc_curve(labels,scores)
     roc_auc=roc_auc_score(labels,scores)
     print(f'AUC={roc_auc:.3f}')
+    ci=nnp.argmin(nnp.abs(tpr-0.99))
+    rej_99=1/fpr[ci]
+    print(f"Background rejection at 99% signal efficiency: {rej_99:.3f}")
     plot_label=r'$t \rightarrow bq\overline{q}$'
     pathlib.Path(os.path.join(plot_dir,'ROC_data')).mkdir(parents=True, exist_ok=True)
     npz_path = os.path.join(plot_dir, 'ROC_data', 'FPR_TPR.npz')
-    nnp.savez(npz_path, fpr=fpr, tpr=tpr,auc=roc_auc,thresholds=thresholds)
+    nnp.savez(npz_path, fpr=fpr, tpr=tpr,auc=roc_auc,thresholds=thresholds,rej_99=rej_99)
     print(f"ROC curve data saved to {npz_path}")
-    
+    # save auc and rej as json
+    with open(os.path.join(plot_dir, 'ROC_data', 'metrics.json'), 'w') as f:
+        json.dump({'auc':roc_auc,'rej_99':rej_99}, f)
     bins_qcd,edges_qcd=nnp.histogram(scores[labels==0],density=True,bins=50,range=[0,2])
     bins_sig,edges_sig=nnp.histogram(scores[labels==1],density=True,bins=50,range=[0,2])
     plt.stairs(bins_qcd,edges_qcd,fill=True,label='q/g jets',alpha=0.6)
