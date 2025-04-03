@@ -33,11 +33,7 @@ def batch_semi_classical_cost(weights,inputs=None,quantum_circuit=None,return_fi
 
 def VQC_cost(weights,inputs=None,quantum_circuit=None,labels=None,return_scores=False,loss_type='MSE',reg=1.):
     bias=weights[-1]
-    #k1=weights[-3]
-    #k2=weights[-3]
     exp_vals=np.array(quantum_circuit(weights,inputs),requires_grad=True) # n_qubits x batch_size
-    #import pdb;pdb.set_trace()
-    #exp_vals=np.mean(exp_vals,axis=0)
     if loss_type=='BCE':
         score=sigmoid(10*exp_vals)#bias+
         loss_fn=mfunc.binary_cross_entropy(labels,score)
