@@ -1,0 +1,8 @@
+name: quantum-photonic
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.8
+    - pip:
+      - -r requirements.txt
