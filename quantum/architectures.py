@@ -18,17 +18,17 @@ two_comb_wires = None
 
 auto_wires = None
 ref_wires = None
-truth_wire = None
 
 num_layers = None
 index = None
 n_trash_qubits = -1
 SEPARATE_ANCILLA=False
 
+params_per_wire = None
 def sigmoid(x):
     return 1/(1+np.exp(-x))
 
-def initialize(wires:int=4,layers:int=1,use_ancilla=False):
+def initialize(wires:int=4,layers:int=1,params:int=3):
     """
     Initializes the wire(qubit) indices, creates the two-combinations and sets up other necessary variables globally
 
@@ -36,16 +36,10 @@ def initialize(wires:int=4,layers:int=1,use_ancilla=False):
         wires (int): Number of wires (qubits) for the circuit.
     """
 
-    global all_wires, auto_wires, two_comb_wires, index,num_layers
-    
-    
+    global all_wires, auto_wires, two_comb_wires, index,num_layers,params_per_wire
     N_QUBITS=wires
-    if use_ancilla:
-        N_QUBITS+=1
-        truth_wire=N_QUBITS # the last wire is the truth wire
-        
     all_wires=[_ for _ in range(N_QUBITS)]
-    
+    params_per_wire=params
     two_comb_wires=list(combinations([i for i in range(wires)],2))
     auto_wires=all_wires[:wires]
     num_layers=layers
@@ -78,7 +72,7 @@ def print_training_params()->None:
     print('two_comb_wires:',two_comb_wires)
     print('no. of layers:',num_layers)
     print('index:',index)
-    print('Using truth wire (if None, then unused) :', truth_wire)
+    print('trainable parameters per qumode: ',params_per_wire)
     print("\n ############################################## \n")
     print("Sleep on it for 3s")
     print("Maybe you want to change something?")
@@ -88,7 +82,61 @@ def print_training_params()->None:
     print("LETS GOOOOOOOOOOOOO")
     time.sleep(1)
 
-def circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
+def circuit(weights: np.ndarray, inputs: np.ndarray) -> float:
+    """
+    Defines the CV quantum circuit using Strawberry Fields Fock device.
+    
+    Args:
+        weights (np.ndarray): Trainable parameters for rotations and squeezing.
+        inputs (np.ndarray): Input data with shape (N, 3) for N qumodes, where each has [pt, eta, phi].
+    
+    Returns:
+        float: Mean photon number across all qumodes.
+    """
+    N = len(auto_wires)  # Number of qumodes
+    sf=10*sigmoid(weights[-3])+0.01
+    # State preparation for each qumode
+    for w in auto_wires:
+        eta = np.squeeze(inputs[:,w, index['eta']]) # corresponding to eta
+        phi = np.squeeze(inputs[:,w, index['phi']]) # corresponding to phi
+        pt = np.squeeze(inputs[:,w, index['pt']]) # corresponding to pt
+        if inputs.shape[0]==1:
+            eta=eta.item()
+            phi=phi.item()
+            pt=pt.item()
+        qml.Displacement(sf*pt, eta, wires=w)
+        qml.Squeezing(eta, pt*phi/2., wires=w)
+        
+    # Apply layers
+    
+    for L in range(num_layers):
+        # Entangle qumode pairs
+        for pair in two_comb_wires:
+            qml.ControlledAddition(1.0, wires=pair)  
+            #qml.Beamsplitter(np.pi/4.,np.pi/2., wires=[w, (w+1)%N])  # ring of CXs
+        
+        # Parameterized rotations and squeezing
+        start = 4 * L * N
+        phi_params = weights[start : start + N]
+        theta_params = weights[start + N : start + 2 * N]
+        omega_params = weights[start + 2 * N : start + 3 * N]
+        delta_params = weights[start + 3 * N : start + 4 * N]
+        for w in auto_wires:
+            qml.Beamsplitter(np.pi/4.,np.pi/2., wires=[w, (w+1)%N])  # ring of BS (literally xD)
+
+        for w in auto_wires:
+            phi = phi_params[w]
+            theta = theta_params[w]
+            omega = omega_params[w]
+            delta=delta_params[w]
+            qml.Displacement(theta, phi, wires=w)
+            qml.Squeezing(omega, delta, wires=w)
+                        
+    return [qml.expval(qml.NumberOperator(wires=w)) for w in range(3)]#qml.expval(qml.NumberOperator(0))
+    
+    
+
+def VQC_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
     """
     Defines the quantum autoencoder (QAE) circuit using provided weights and inputs.
 
@@ -199,8 +247,9 @@ class QuantumClassifier:
         backend_name (str): Backend for the QNode (e.g., 'autograd', 'torch', 'jax').
         test (bool): If True, sets the circuit immediately for testing.
     """
-    def __init__(self, wires:int=4,shots=5000,dev_name:str='default.qubit',ancilla:bool=False,backend_name:str='autograd',layers:int=1,test=False):
-        initialize(wires=wires,layers=layers)
+    def __init__(self, wires:int=4,shots=5000,dev_name:str='default.qubit',\
+            ancilla:bool=False,backend_name:str='autograd',layers:int=1,test=False,params:int=3):
+        initialize(wires=wires,layers=layers,params=params)
         self.device=set_device(shots=shots,device_name=dev_name)
         self.backend=backend_name
         self.current_weights=None
