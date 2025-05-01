@@ -28,7 +28,7 @@ def main(cfg: DictConfig):
     except:
         run_str=f"abal_{cfg.seed}"
     
-    wandb.init(project="1P1Q", config=OmegaConf.to_container(cfg), name=run_str,notes=cfg.desc)
+    wandb.init(project="1P1Qm", config=OmegaConf.to_container(cfg), name=run_str,notes=cfg.desc)
     with open(os.path.join(save_dir, "wandb_run_id.txt"), "w") as f:
         f.write(wandb.run.id)
 
@@ -90,7 +90,7 @@ def main(cfg: DictConfig):
         cost_fn=loss.probabilistic_loss#loss.VQC_cost
     else:
         cost_fn=loss.VQC_cost
-    VQC = qc.QuantumClassifier(wires=cfg.wires, shots=cfg.shots,dev_name=cfg.device_name,layers=cfg.num_layers)
+    VQC = qc.QuantumClassifier(wires=cfg.wires, shots=cfg.shots,dev_name=cfg.device_name,layers=cfg.num_layers,params=cfg.params_per_wire)
     VQC.set_circuit(circuit_type=cfg.circuit_type)
 
     if cfg.extra_weights>4:
@@ -98,12 +98,11 @@ def main(cfg: DictConfig):
         print("Are you sure? Press ctrl+c to cancel within 5s")
         time.sleep(5)
 
-    NUM_WEIGHTS = len(qc.auto_wires)*3*cfg.num_layers+cfg.extra_weights # Extra weight for the bias term in VQC + scale factor for pT
-    if cfg.circuit_type=='CNN':
-        NUM_WEIGHTS = 2*cfg.num_layers+cfg.extra_weights
-
+    NUM_WEIGHTS = len(qc.auto_wires)*cfg.params_per_wire*cfg.num_layers+cfg.extra_weights # Extra weight for the bias term in VQC + scale factor for pT
+    
     if not cfg.resume:
         init_weights = qc.np.float64(qc.np.random.uniform(0, qc.np.pi, size=(NUM_WEIGHTS,), requires_grad=True))
+        init_weights[-cfg.extra_weights:] = 1.
         #init_weights = qc.np.ones((NUM_WEIGHTS,), requires_grad=True)*qc.np.pi/2.
         #init_weights[-cfg.extra_weights:]=qc.np.pi/2.
         #init_weights[-1]=0.
