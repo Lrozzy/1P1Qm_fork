@@ -1,5 +1,5 @@
 import os
-
+from typing import List, Dict
 def getIndex(which:str='particle',feat:str=None)->int:
     if which=='particle':
         nameArray=particleFeatureNames
@@ -28,7 +28,7 @@ class PathSetter:
         return os.path.join(self.data_path,path_dict[key])
 
 
-path_dict:dict[str:str]={'QCD_train':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/train/',
+path_dict={'QCD_train':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/train/',
         'QCD_test':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/test/',
         'QCD_SR':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_signalregion_parts/',
         'QCD_lib':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/library/',
@@ -73,10 +73,10 @@ path_dict:dict[str:str]={'QCD_train':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideban
         'VQC_val':'VQC/merged/flat_val/',
            }
 
-eventFeatureNames:list[str]=['mJJ', 'j1Pt', 'j1Eta', 'j1Phi', 'j1M', 'j1E', 'j2Pt',
+eventFeatureNames:List[str]=['mJJ', 'j1Pt', 'j1Eta', 'j1Phi', 'j1M', 'j1E', 'j2Pt',
        'j2M', 'j2E', 'DeltaEtaJJ', 'DeltaPhiJJ']
 
-particleFeatureNames:list[str]=['eta', 'phi', 'pt']
+particleFeatureNames:List[str]=['eta', 'phi', 'pt']
 
 labels={'grav_1p5_narrow':'$M_{grav}=1.5$ TeV','grav_2p5_narrow':'$M_{grav}=2.5$ TeV','grav_3p5_narrow':'$M_{grav}=3.5$ TeV'\
         ,'grav_4p5_narrow':'$M_{grav}=4.5$ TeV','AtoHZ_1p5':'$M_{A}=1.5$ TeV','AtoHZ_2p5':'$M_{A}=2.5$ TeV',\

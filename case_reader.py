@@ -35,7 +35,7 @@ class CASEDelphesJetDataset(IterableDataset):
         np.ndarray: Batch of data samples.
     """
     def __init__(self, filelist:List[str]=None, batch_size:int=32, max_samples:int=5e4, data_key='jetConstituentsList',\
-                 feature_key='eventFeatures',input_shape:tuple[int]=(10, 3),epsilon:float=1.0e-4,train:bool=True,\
+                 feature_key='eventFeatures',input_shape:Tuple[int]=(10, 3),epsilon:float=1.0e-4,train:bool=True,\
                     normalize_pt:bool=False,logger=None):
         super().__init__()
         self.filelist = sorted(filelist)
@@ -225,7 +225,7 @@ class CASEDelphesJetDataset(IterableDataset):
                 sample_counter += batch_data.shape[0]
                 yield np.array(batch_data,requires_grad=False), np.array(batch_labels,dtype=np.integer,requires_grad=False)
 
-def OneP1QDataLoader(input_shape:tuple[int]=(100, 3),train:bool=True,dataset='delphes',**kwargs) -> DataLoader:
+def OneP1QDataLoader(input_shape:Tuple[int]=(100, 3),train:bool=True,dataset='delphes',**kwargs) -> DataLoader:
     '''
     Wrapper function to create a DataLoader for the CASEDelphesJetDataset.
     Args:

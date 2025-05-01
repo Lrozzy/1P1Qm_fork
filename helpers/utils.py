@@ -117,10 +117,10 @@ def folder_save(events,folder_name,save_path,append=False):
     os.chdir(pwd)
     return
 
-eventFeatureNames:list[str]=['mJJ', 'j1Pt', 'j1Eta', 'j1Phi', 'j1M', 'j1E', 'j2Pt',
+eventFeatureNames=['mJJ', 'j1Pt', 'j1Eta', 'j1Phi', 'j1M', 'j1E', 'j2Pt',
        'j2M', 'j2E', 'DeltaEtaJJ', 'DeltaPhiJJ']
 
-particleFeatureNames:list[str]=['eta', 'phi', 'pt']
+particleFeatureNames=['eta', 'phi', 'pt']
 
 jetFeatureNames=['jet_pt', 'jet_eta', 'jet_phi', 'jet_energy',                                                                                    
        'jet_nparticles', 'jet_sdmass', 'jet_tau1', 'jet_tau2',                                                                          
