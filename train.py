@@ -21,7 +21,7 @@ def main(cfg: DictConfig):
     save_dir = os.path.join(cfg.save_dir, cfg.seed)
     plot_dir = os.path.join(save_dir, 'plots')
     pathlib.Path(plot_dir).mkdir(parents=True, exist_ok=True)
-
+    assert cfg.batch_size==1, "Batch size must be 1 for this model"
     # Initialize WandB
     try:
         run_str=f"{os.getlogin()}_{cfg.seed}"
