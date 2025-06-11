@@ -1,0 +1,35 @@
+defaults:
+  - base
+
+seed: 'VPC_TRIAL'
+train: true
+wires: 10
+shots: 5000
+train_n: 1000
+valid_n: 1000
+batch_size: 1
+epochs: 40
+extra_weights: 3
+backend: 'autograd'
+device_name: 'default.gaussian' # or strawberrryfields.gaussian
+#cutoff_dim: 10
+lr: 0.05
+params_per_wire: 4 # if you change this, you need to change the model in the code at quantum/architectures.py
+save: true
+flat: true
+num_layers: 1
+evictable: false
+resume: false
+desc: 'trial run on qumode'
+norm_pt: true
+lr_decay: true
+patience: 4
+loss: 'MSE' # or 'BCE'
+dataset: 'jetclass' # or 'delphes' or 'AOJ'
+improv: 0.1
+save_dir: '/your/models/get/saved/here'
+data_dir: '/path/to/input/data/here/'
+dump: '/dump/results/of/inference/here' # only for testing
+read_n: 2000 # only for testing
+load: false # only for testing
+log_wandb: false # only for testing
