@@ -116,21 +116,18 @@ def circuit(weights: np.ndarray, inputs: np.ndarray) -> float:
             #qml.Beamsplitter(np.pi/4.,np.pi/2., wires=[w, (w+1)%N])  # ring of CXs
         
         # Parameterized rotations and squeezing
-        start = 4 * L * N
+        start = 3 * L * N
         phi_params = weights[start : start + N]
         theta_params = weights[start + N : start + 2 * N]
         omega_params = weights[start + 2 * N : start + 3 * N]
-        delta_params = weights[start + 3 * N : start + 4 * N]
-        for w in auto_wires:
-            qml.Beamsplitter(np.pi/4.,np.pi/2., wires=[w, (w+1)%N])  # ring of BS (literally xD)
-
+        
         for w in auto_wires:
             phi = phi_params[w]
             theta = theta_params[w]
             omega = omega_params[w]
-            delta=delta_params[w]
-            qml.Displacement(theta, phi, wires=w)
-            qml.Squeezing(omega, delta, wires=w)
+            #qml.Beamsplitter(theta,phi, wires=[w, (w+1)%N])  # ring of BS (literally xD)
+            qml.Displacement(theta,phi, wires=w)
+            qml.Squeezing(omega, np.pi/4, wires=w)
                         
     return [qml.expval(qml.NumberOperator(wires=w)) for w in range(3)]#qml.expval(qml.NumberOperator(0))
     
