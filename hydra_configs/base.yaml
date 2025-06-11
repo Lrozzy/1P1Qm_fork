@@ -1,38 +1,32 @@
 seed: 'base'
-base_dir: '/work/abal/qae_hep/'
+base_dir: '/directory/where/you/run/this/script/from'
 train: true
-dataset: 'delphes'
+dataset: 'jetclass' # or 'delphes' or 'AOJ'
 wires: 4
-ancilla: False
-trash_qubits: 3
 shots: 2500
 train_n: 2000
 valid_n: 400
-batch_size: 100
+batch_size: 1
 epochs: 25
 improv: 0.01
-extra_weights: null
+extra_weights: 0
 backend: 'autograd'
-device_name: 'lightning.kokkos'
+device_name: 'default.gaussian' # or strawberryfields.gaussian 
 lr: 0.05
 lr_decay: false
 save: true
 flat: false
 evictable: false
-separate_ancilla: false
 resume: false
 desc: 'Training run'
 norm_pt: false
-substructure: false
 patience: 2
-use_reuploading: false
-loss: 'semiclassical'
-save_dir: '/work/abal/qae_hep/saved_models/'
-data_dir: '/storage/9/abal/CASE/delphes/'
-dump: '/ceph/abal/QML/delphes/dumps/' # only for testing
+loss: 'MSE' # or 'BCE'
+save_dir: '/your/models/get/saved/here'
+data_dir: '/path/to/input/data/here/'
+dump: '/dump/results/of/inference/here' # only for testing
 read_n: 2000 # only for testing
 load: false # only for testing
-scheme: 'min' # only for testing
 log_wandb: false # only for testing
 load_best: false # only for testing
-circuit_type: 'normal'
+circuit_type: 'normal' # or 'CNN', but this is not really better
