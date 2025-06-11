@@ -93,7 +93,6 @@ quantum-blackbird==0.5.0
 quantum-xir==0.2.2
 requests==2.32.3
 retworkx==0.15.1
-root-numpy==4.8.0
 ruamel.yaml==0.18.10
 ruamel.yaml.clib==0.2.8
 rustworkx==0.15.1
@@ -115,9 +114,9 @@ toml==0.10.2
 tomli==2.2.1
 tomlkit==0.13.2
 toolz==0.12.1
-torch==2.4.1+cpu
-torchaudio==2.4.1+cpu
-torchvision==0.19.1+cpu
+torch==2.4.1+cpu --find-links https://download.pytorch.org/whl/cpu
+torchaudio==2.4.1+cpu --find-links https://download.pytorch.org/whl/cpu
+torchvision==0.19.1+cpu --find-links https://download.pytorch.org/whl/cpu
 tqdm==4.67.1
 typing==3.7.4.3
 typing_extensions==4.13.2
