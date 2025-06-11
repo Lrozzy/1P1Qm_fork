@@ -17,7 +17,6 @@ Thereafter, run the following commands:
 The required list of packages can be seen in the `requirements.txt` file, which is called upon by conda. 
 
 ## Training on CPU
-**Note:** You are on the Qumode branch (named VPC: Variational Photonic Classifier), which uses an older version of Pennylane and the default.gaussian device. This does not have GPU or multi-CPU support.
 
 In this repository, we use Hydra for managing parameters, and WandB for experiment tracking.  
 
@@ -27,7 +26,7 @@ Assuming that your config YAML file is placed in the directory `$HYDRA_CONF`, an
 
 
 Examples of config YAML files can be found in the directory `hydra_configs`.
-In addition, don't forget to set the `PYTHONPATH` environment variable such that it includes the base directory `qae_hep` (or whatever you named it).
+In addition, don't forget to set the `PYTHONPATH` environment variable such that it includes the base directory (this can be whatever you named it).
 
 ## Inference
 
@@ -41,4 +40,4 @@ There are more arguments that you can see in the examples, such as `log_wandb`, 
 
 - The argument `seed` is used to identify a given training run, which is then further described by the text contained in the `desc` argument.
 - If `seed = S`, then a new subdirectory is created in the base save directory at the path `/path/to/base/directory/S` and your results are saved there.
-- The data loader is defined in `case_reader.py`, the quantum circuit architecture is defined in `quantum.architecture` and the loss function is defined in `quantum.losses`. Feel free to modify/add to it!
+- The data loader is defined in `case_reader.py`, the quantum circuit architecture is defined in `quantum.architectures` and the loss function is defined in `quantum.losses`. Feel free to modify/add to it!
