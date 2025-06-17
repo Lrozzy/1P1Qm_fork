@@ -1,5 +1,5 @@
 seed: 'base'
-base_dir: '/directory/where/you/run/this/script/from'
+base_dir: '/home/hep/lr1424/1P1Qm_fork/'
 train: true
 dataset: 'jetclass' # or 'delphes' or 'AOJ'
 wires: 4
@@ -13,20 +13,26 @@ extra_weights: 0
 backend: 'autograd'
 device_name: 'default.gaussian' # or strawberryfields.gaussian 
 lr: 0.05
+num_layers: 1
+params_per_wire: 3
 lr_decay: false
 save: true
 flat: false
 evictable: false
+separate_ancilla: false
 resume: false
 desc: 'Training run'
 norm_pt: false
-patience: 2
+substructure: false
+patience: 3
+use_reuploading: false
 loss: 'MSE' # or 'BCE'
-save_dir: '/your/models/get/saved/here'
-data_dir: '/path/to/input/data/here/'
-dump: '/dump/results/of/inference/here' # only for testing
+save_dir: '/home/hep/lr1424/1P1Qm_fork/saved_models/'
+data_dir: '/home/hep/lr1424/1P1Qm_fork/'
+dump: '/home/hep/lr1424/1P1Qm_fork/dumps/' # only for testing
 read_n: 2000 # only for testing
 load: false # only for testing
 log_wandb: false # only for testing
 load_best: false # only for testing
+scheme: 'min' # only for testing
 circuit_type: 'normal' # or 'CNN', but this is not really better

@@ -1,0 +1,10 @@
+__pycache__/
+dumps/
+flat_test/
+flat_train/
+flat_val/
+helpers/__pycache__/
+outputs/
+quantum/__pycache__/
+sandbox.ipynb
+saved_models/

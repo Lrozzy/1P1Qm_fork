@@ -68,9 +68,9 @@ path_dict={'QCD_train':'qcd_sqrtshatTeV_13TeV_PU40_NEW_EXT_sideband_parts/train/
         'TTBar_flat_test':'flat_test/TTBar_/',
         'HToGG_flat_test':'flat_test/HToGG/',
         'ZToQQ_flat_test':'flat_test/ZToQQ/',
-        'VQC_train':'VQC/merged/flat_train/',
-        'VQC_test':'VQC/merged/flat_test/',
-        'VQC_val':'VQC/merged/flat_val/',
+        'VQC_train':'flat_train/', # Changed from VQC/merged/flat_train/ to flat_train/
+        'VQC_test':'flat_test/', # Same
+        'VQC_val':'flat_val/', # Same
            }
 
 eventFeatureNames:List[str]=['mJJ', 'j1Pt', 'j1Eta', 'j1Phi', 'j1M', 'j1E', 'j2Pt',

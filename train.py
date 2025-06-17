@@ -26,7 +26,7 @@ def main(cfg: DictConfig):
     try:
         run_str=f"{os.getlogin()}_{cfg.seed}"
     except:
-        run_str=f"abal_{cfg.seed}"
+        run_str=f"leo_{cfg.seed}"
     
     wandb.init(project="1P1Qm", config=OmegaConf.to_container(cfg), name=run_str,notes=cfg.desc)
     with open(os.path.join(save_dir, "wandb_run_id.txt"), "w") as f:
