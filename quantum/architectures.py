@@ -1,599 +1,493 @@
- # pylint: disable=maybe-no-member
+# pylint: disable=maybe-no-member
 from typing import Optional, Callable, Union, List, Dict, Tuple, Any
-import pennylane as qml
+import strawberryfields as sf
+from strawberryfields.ops import Dgate, Sgate, CXgate, MeasureMeanPhoton, BSgate
+import tensorflow as tf
+import numpy as np # For pi, and initial array conversions if necessary
 from helpers.utils import getIndex
 from itertools import combinations
 import time
-from tqdm import tqdm
-import pennylane.numpy as np
-import os,pathlib
+import pathlib
 import helpers.utils as ut
-import subprocess
-from torch.utils.data import DataLoader
-from sklearn.metrics import roc_auc_score
+import os # For path operations in save/load
+
 # Global variable initialization
-dev = None
-all_wires=None
-two_comb_wires = None
+all_wires: Optional[List[int]] = None
+two_comb_wires: Optional[List[Tuple[int, int]]] = None
+auto_wires: Optional[List[int]] = None
+num_layers: Optional[int] = None
+index: Optional[Dict[str, int]] = None
+params_per_wire: Optional[int] = None
 
-auto_wires = None
-ref_wires = None
+def sigmoid(x: tf.Tensor) -> tf.Tensor:
+    return 1.0 / (1.0 + tf.exp(-tf.cast(x, dtype=tf.float32)))
 
-num_layers = None
-index = None
-n_trash_qubits = -1
-SEPARATE_ANCILLA=False
-
-params_per_wire = None
-def sigmoid(x):
-    return 1/(1+np.exp(-x))
-
-def initialize(wires:int=4,layers:int=1,params:int=3):
+def initialize(wires: int = 4, layers: int = 1, params: int = 3):
     """
-    Initializes the wire(qubit) indices, creates the two-combinations and sets up other necessary variables globally
+    Initializes the qumode indices and other necessary variables globally.
+    """
+    global all_wires, auto_wires, two_comb_wires, index, num_layers, params_per_wire
+    N_QUMODES = wires
+    all_wires = list(range(N_QUMODES))
+    params_per_wire = params
+    two_comb_wires = list(combinations(list(range(N_QUMODES)), 2))
+    auto_wires = all_wires[:N_QUMODES]
+    num_layers = layers
+    index = {'eta': getIndex('particle', 'eta'), 'phi': getIndex('particle', 'phi'), 'pt': getIndex('particle', 'pt')}
 
+def set_sf_engine(cutoff_dim: int, backend_name: str = "tf") -> sf.Engine:
+    """
+    Sets the Strawberry Fields engine for simulation.
     Args:
-        wires (int): Number of wires (qubits) for the circuit.
-    """
-
-    global all_wires, auto_wires, two_comb_wires, index,num_layers,params_per_wire
-    N_QUBITS=wires
-    all_wires=[_ for _ in range(N_QUBITS)]
-    params_per_wire=params
-    two_comb_wires=list(combinations([i for i in range(wires)],2))
-    auto_wires=all_wires[:wires]
-    num_layers=layers
-    index={'eta':getIndex('particle','eta'),'phi':getIndex('particle','phi'),'pt':getIndex('particle','pt')}
-
-def set_device(shots:int=5000,device_name:str='default.qubit')-> qml.Device:
-    """
-    Sets the device on which to simulate/run the quantum circuit
-
-    Args:
-        shots (int): Number of shots for each measurement of an observable.
-        device_name (str): Name of the quantum device to use.
-
+        cutoff_dim (int): Fock space cutoff dimension.
+        backend_name (str): Name of the Strawberry Fields backend ("tf", "fock").
     Returns:
-        qml.Device: Initialized Pennylane device.
+        sf.Engine: Initialized Strawberry Fields engine.
     """
-    global dev
-    dev=qml.device(device_name,wires=len(all_wires),shots=shots)
-    print(dev)
-    return dev
-def print_training_params()->None:
+    if backend_name == "tf":
+        engine = sf.Engine(backend="tf", backend_options={"cutoff_dim": cutoff_dim})
+    elif backend_name == "fock":
+        engine = sf.Engine(backend="fock", backend_options={"cutoff_dim": cutoff_dim})
+    else:
+        raise ValueError(f"Unsupported Strawberry Fields backend: {backend_name}")
+    print(f"Strawberry Fields engine initialized with backend: {engine.backend_name}, cutoff_dim: {cutoff_dim}")
+    return engine
+
+def print_training_params() -> None:
     """
     Prints out the initialized training parameters for sanity check.
-    Pauses for a short time to allow the user to review the parameters.
     """
-    print("\n Sanity check: \n")
-    print('all_wires:',all_wires)
-    print()
-    print('auto_wires:',auto_wires)
-    print('two_comb_wires:',two_comb_wires)
-    print('no. of layers:',num_layers)
-    print('index:',index)
-    print('trainable parameters per qumode: ',params_per_wire)
-    print("\n ############################################## \n")
+    print("\\n Sanity check: \\n")
+    print('all_wires:', all_wires)
+    print('auto_wires:', auto_wires)
+    print('two_comb_wires:', two_comb_wires)
+    print('no. of layers:', num_layers)
+    print('index:', index)
+    print('trainable parameters per qumode: ', params_per_wire)
+    print("\\n ############################################## \\n")
     print("Sleep on it for 3s")
     print("Maybe you want to change something?")
     print("Then press CTRL-C")
-    print("\n ############################################## \n")
+    print("\\n ############################################## \\n")
     time.sleep(3)
     print("LETS GOOOOOOOOOOOOO")
     time.sleep(1)
 
-def circuit(weights: np.ndarray, inputs: np.ndarray) -> float:
+def sf_circuit_template(weights: tf.Tensor, inputs: tf.Tensor) -> sf.Program:
     """
-    Defines the CV quantum circuit using Strawberry Fields Fock device.
-    
+    Defines the CV quantum circuit using Strawberry Fields.
     Args:
-        weights (np.ndarray): Trainable parameters for rotations and squeezing.
-        inputs (np.ndarray): Input data with shape (N, 3) for N qumodes, where each has [pt, eta, phi].
-    
+        weights (tf.Tensor): Trainable parameters.
+        inputs (tf.Tensor): Input data. Assumes inputs are correctly shaped for TF.
+                            Expected shape for inputs: [num_qumodes, num_features_per_qumode]
+                            This function is designed for ONE instance from a batch.
+                            Batching (e.g. tf.map_fn over inputs) should be handled by the caller.
     Returns:
-        float: Mean photon number across all qumodes.
+        sf.Program: The Strawberry Fields program.
     """
-    N = len(auto_wires)  # Number of qumodes
-    sf=10*sigmoid(weights[-3])+0.01
-    # State preparation for each qumode
-    for w in auto_wires:
-        eta = np.squeeze(inputs[:,w, index['eta']]) # corresponding to eta
-        phi = np.squeeze(inputs[:,w, index['phi']]) # corresponding to phi
-        pt = np.squeeze(inputs[:,w, index['pt']]) # corresponding to pt
-        if inputs.shape[0]==1:
-            eta=eta.item()
-            phi=phi.item()
-            pt=pt.item()
-        qml.Displacement(sf*pt, eta, wires=w)
-        qml.Squeezing(eta, pt*phi/2., wires=w)
-        
-    # Apply layers
+    if all_wires is None or auto_wires is None or index is None or num_layers is None or two_comb_wires is None:
+        raise ValueError("Global parameters (all_wires, auto_wires, etc.) not initialized. Call initialize() first.")
+
+    prog = sf.Program(len(all_wires))
+
+    if not isinstance(weights, tf.Tensor):
+        weights = tf.convert_to_tensor(weights, dtype=tf.float32)
+    if not isinstance(inputs, tf.Tensor):
+        inputs = tf.convert_to_tensor(inputs, dtype=tf.float32)
+
+    if tf.rank(inputs) != 2: # (num_qumodes, features)
+        raise ValueError(f"sf_circuit_template expects single instance inputs with rank 2 ([num_qumodes, num_features]). Got rank {tf.rank(inputs)}. Batch with tf.map_fn.")
     
-    for L in range(num_layers):
-        # Entangle qumode pairs
-        for pair in two_comb_wires:
-            qml.ControlledAddition(1.0, wires=pair)  
-            #qml.Beamsplitter(np.pi/4.,np.pi/2., wires=[w, (w+1)%N])  # ring of CXs
-        
-        # Parameterized rotations and squeezing
-        start = 3 * L * N
-        phi_params = weights[start : start + N]
-        theta_params = weights[start + N : start + 2 * N]
-        omega_params = weights[start + 2 * N : start + 3 * N]
-        
-        for w in auto_wires:
-            phi = phi_params[w]
-            theta = theta_params[w]
-            omega = omega_params[w]
-            #qml.Beamsplitter(theta,phi, wires=[w, (w+1)%N])  # ring of BS (literally xD)
-            qml.Displacement(theta,phi, wires=w)
-            qml.Squeezing(omega, np.pi/4, wires=w)
-                        
-    return [qml.expval(qml.NumberOperator(wires=w)) for w in range(3)]#qml.expval(qml.NumberOperator(0))
-    
-    
+    inputs_single = inputs # Explicitly state we are working with a single instance
 
-def VQC_circuit(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
-    """
-    Defines the quantum autoencoder (QAE) circuit using provided weights and inputs.
+    sf_scale = 10.0 * sigmoid(weights[-3]) + 0.01
 
-    Args:
-        weights (np.ndarray): Circuit parameters (AKA weights) for rotations.
-        inputs (np.ndarray): Input data to be used in the circuit. Defaults to None.
+    with prog.context as q:
+        for w_idx in auto_wires:
+            current_input_features = inputs_single[w_idx] 
 
-    Returns:
-        Any: Expected value of Pauli-Z tensor product on the ancillary qubits.
-    """
-    # State preparation for all wires
-    N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
-    # State preparation for all wires
-    sf=2*np.pi*sigmoid(weights[-2])+1
-    #sf=0.5+sigmoid(weights[-2])
-    #sfb=weights[-3]
-    # for w in auto_wires:
-    #     qml.PauliX(wires=w)
-    
-        # QAE Circuit
-    for L in range(num_layers):
-        for w in auto_wires:
-        # Variables named according to spherical coordinate system, it's easier to understand :)
-            zenith = np.squeeze(inputs[:,w, index['eta']]) # corresponding to eta
-            azimuth = np.squeeze(inputs[:,w, index['phi']]) # corresponding to phi
-            radius = np.squeeze(inputs[:,w, index['pt']]) # corresponding to pt
-            if inputs.shape[0]==1:
-                zenith=zenith.item()
-                azimuth=azimuth.item()
-                radius=radius.item()
-            qml.RY(sf*radius*zenith, wires=w)
-            qml.RX(sf*radius*azimuth, wires=w)
+            eta = tf.cast(current_input_features[index['eta']], dtype=tf.float32)
+            phi = tf.cast(current_input_features[index['phi']], dtype=tf.float32)
+            pt_val = tf.cast(current_input_features[index['pt']], dtype=tf.float32)
+
+            Dgate(sf_scale * pt_val, eta) | q[w_idx]
+            Sgate(eta, pt_val * phi / 2.0) | q[w_idx]
+
+        N_auto = len(auto_wires)
+        for L_idx in range(num_layers):
+            for pair in two_comb_wires:
+                CXgate(1.0) | (q[pair[0]], q[pair[1]])
             
-        start=3*L*N
-        
-        for w in auto_wires:
-            qml.CNOT(wires=[w,(w+1)%N])  # ring of CNOTs
-
-        for phi,theta,omega,w in zip(weights[start:start+N],weights[start+N:start+2*N],weights[start+2*N:start+3*N],auto_wires):
-            qml.Rot(0.,theta,omega,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
-            qml.RX(phi,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
+            # Add Beamsplitters, similar to the original Pennylane circuit's layer structure
+            # Original: qml.Beamsplitter(np.pi/4.,np.pi/2., wires=[w, (w+1)%N])
+            # This loop applies BSgate in a ring fashion to the qumodes in auto_wires
+            for i in range(N_auto):
+                idx1 = auto_wires[i] # Current qumode index
+                idx2 = auto_wires[(i + 1) % N_auto] # Next qumode index in a ring
+                BSgate(np.pi / 4.0, np.pi / 2.0) | (q[idx1], q[idx2])
             
-    return qml.expval(qml.PauliZ(0))  
-
-
-def QCNN(weights: np.ndarray, inputs: Optional[np.ndarray] = None) -> Any:
-    """
-    Defines the quantum autoencoder (QAE) circuit using provided weights and inputs.
-
-    Args:
-        weights (np.ndarray): Circuit parameters (AKA weights) for rotations.
-        inputs (np.ndarray): Input data to be used in the circuit. Defaults to None.
-
-    Returns:
-        Any: Expected value of Pauli-Z tensor product on the ancillary qubits.
-    """
-    # State preparation for all wires
-    N = len(auto_wires)  # Assuming wires is a list like [0, 1, ..., N-1]
-    # State preparation for all wires
-    sf=2*np.pi*sigmoid(weights[-2])+1
-    #sfb=weights[-3]
-    # for w in auto_wires:
-    #     qml.PauliX(wires=w)
-    
-        # QAE Circuit
-    for w in auto_wires:
-    # Variables named according to spherical coordinate system, it's easier to understand :)
-        zenith = np.squeeze(inputs[:,w, index['eta']]) # corresponding to eta
-        azimuth = np.squeeze(inputs[:,w, index['phi']]) # corresponding to phi
-        radius = np.squeeze(inputs[:,w, index['pt']]) # corresponding to pt
-        if inputs.shape[0]==1:
-            zenith=zenith.item()
-            azimuth=azimuth.item()
-            radius=radius.item()
-        qml.RY(sf*radius*zenith, wires=w)
-        qml.RZ(sf*radius*azimuth, wires=w)
+            layer_params_flat_idx_start = L_idx * N_auto * 3
             
-        
-    for w in auto_wires:
-        qml.CY(wires=[w,(w+1)%N])  # ring of CNOTs
-
-    for L in range(num_layers):
-        phi=weights[2*L]
-        theta=weights[2*L+1]
-        #omega=weights[3*L+2]
-        for w in auto_wires[:-(1+L)]:
+            disp_mag_params_layer = weights[layer_params_flat_idx_start : layer_params_flat_idx_start + N_auto]
+            disp_phase_params_layer = weights[layer_params_flat_idx_start + N_auto : layer_params_flat_idx_start + 2 * N_auto]
             
-            qml.RZ(phi,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
-            qml.RY(theta,wires=w) # perform arbitrary rotation in 3D space instead of RX/RY rotation
-            qml.RZ(phi,wires=(w+L+1)%N) # perform arbitrary rotation in 3D space instead of RX/RY rotation
-            qml.RY(theta,wires=(w+L+1)%N) # perform arbitrary rotation in 3D space instead of RX/RY rotation
-            qml.CNOT(wires=[w,(w+1+L)%N])  # ring of CNOTs
+            squeeze_mag_params_layer = weights[layer_params_flat_idx_start + 2 * N_auto : layer_params_flat_idx_start + 3 * N_auto]
+            fixed_squeeze_phase_layer = tf.constant(np.pi / 4.0, dtype=tf.float32)
+
+            for i, w_idx_loop in enumerate(auto_wires):
+                current_disp_mag = disp_mag_params_layer[i]
+                current_disp_phase = disp_phase_params_layer[i]
+                Dgate(current_disp_mag, current_disp_phase) | q[w_idx_loop]
+
+                current_squeeze_mag = squeeze_mag_params_layer[i]
+                Sgate(current_squeeze_mag, fixed_squeeze_phase_layer) | q[w_idx_loop]
+                
+        num_modes_to_measure = min(len(auto_wires), 3)
+        for i in range(num_modes_to_measure):
+            w_idx_to_measure = auto_wires[i]
+            MeasureMeanPhoton() | q[w_idx_to_measure]
             
-    return [qml.expval(qml.PauliZ(i)) for i in auto_wires]  
-
-
-
+    return prog
 
 class QuantumClassifier:
     """
-    A class that constructs a Quantum Autoencoder (QAE) using pre-defined circuits.
-
-    Args:
-        wires (int): Number of qubits to use.
-        shots (int): Number of shots for measurements on quantum states.
-        trash_qubits (int): Number of trash qubits used in the circuit.
-        dev_name (str): Name of the quantum device to use.
-        backend_name (str): Backend for the QNode (e.g., 'autograd', 'torch', 'jax').
-        test (bool): If True, sets the circuit immediately for testing.
+    A class that constructs a Quantum Classifier using Strawberry Fields and TensorFlow.
     """
-    def __init__(self, wires:int=4,shots=5000,dev_name:str='default.qubit',\
-            ancilla:bool=False,backend_name:str='autograd',layers:int=1,test=False,params:int=3):
+    def __init__(self, wires:int=4, cutoff_dim: int = 5, sf_backend_name: str = "tf",
+                 layers:int=1, params:int=3):
         initialize(wires=wires,layers=layers,params=params)
-        self.device=set_device(shots=shots,device_name=dev_name)
-        self.backend=backend_name
-        self.current_weights=None
-        self.circuit = None
-        self.ancilla = ancilla
-        if test: self.set_circuit() # Set the circuit for inference
-    def set_circuit(self,circuit_type='normal')->None:
-        """
-        Configures the QNode circuit for the quantum autoencoder.
+        self.sf_engine = set_sf_engine(cutoff_dim=cutoff_dim, backend_name=sf_backend_name)
+        self.current_weights: Optional[tf.Variable] = None
+        self.sf_circuit_template_fn = sf_circuit_template
 
+    def set_circuit(self) -> None:
         """
-        if circuit_type=='CNN':
-            print("Using CNN circuit with no. of conv layers = no. of qubits (for now)")
-            print("Things might be slow")
-            time.sleep(2)
-            self.circuit=qml.QNode(QCNN,self.device,interface=self.backend)
+        Ensures the circuit template is assigned. (Now mostly a placeholder as it's set in __init__)
+        """
+        if self.sf_circuit_template_fn is None: # Should not happen if __init__ is correct
+             self.sf_circuit_template_fn = sf_circuit_template
+        print("Strawberry Fields circuit template is set.")
+
+    def fetch_circuit_template(self) -> Callable:
+        """
+        Retrieves the Strawberry Fields circuit template function.
+        """
+        if self.sf_circuit_template_fn is None:
+            raise RuntimeError("Strawberry Fields circuit template not initialized.")
+        return self.sf_circuit_template_fn
+
+    def fetch_engine_backend_name(self) -> str:
+        """
+        Fetches the backend name of the Strawberry Fields engine.
+        """
+        return self.sf_engine.backend_name
+
+    def load_weights(self, model_path:str, train:bool=False):
+        """
+        Loads pre-trained weights. Weights are converted to tf.Variable.
+        """
+        dictionary = ut.Unpickle(model_path)
+        loaded_weights_np = dictionary['weights']
+        
+        if self.current_weights is None:
+            self.current_weights = tf.Variable(initial_value=loaded_weights_np, trainable=train, dtype=tf.float32, name="circuit_weights")
         else:
-            self.circuit = qml.QNode(circuit,self.device,interface=self.backend)
-    def fetch_circuit(self) -> qml.QNode:
-        """
-        Retrieves the quantum circuit for inference or training.
+            # If current_weights exists, update its value and trainable status
+            self.current_weights.assign(loaded_weights_np)
+            # This is tricky: tf.Variable.trainable cannot be changed after creation directly in all TF versions easily.
+            # The safest way if 'trainable' status needs to change is to recreate the variable.
+            if self.current_weights.trainable != train:
+                 self.current_weights = tf.Variable(initial_value=self.current_weights.numpy(), trainable=train, dtype=tf.float32, name="circuit_weights_recreated")
 
-        Returns:
-            qml.QNode: Configured quantum node (QNode) circuit.
-        """
-        if self.circuit is None:
-            self.set_circuit()
-        return self.circuit
-    def fetch_backend(self) -> str:
-        """
-        Fetches the backend being used for the QNode.
+        print(f"Weights loaded from {model_path}. Trainable: {self.current_weights.trainable}")
 
-        Returns:
-            str: Name of the backend (e.g., 'autograd', 'torch').
-        """
-        return self.backend
-    def load_weights(self,model_path:str,train:bool=False):
-        """
-        Loads the pre-trained weights for the autoencoder from the given file.
-
-        Args:
-            model_path (str): Path to the file containing the pre-trained model.
-            train (bool): If True, enables gradients for the weights.
-        """
-        dictionary=ut.Unpickle(model_path)
-        self.current_weights=np.array(dictionary['weights'],requires_grad=train)
     def print_weights(self):
         """
-        Prints the current weights of the quantum autoencoder.
+        Prints the current weights.
         """
-        print('Current weights: \n\n',self.current_weights)
-
-    def run_inference(self,data:np.ndarray=None,labels:np.ndarray=None,loss_fn:Callable=None,loss_type='BCE'):
-        """
-        Runs inference on the autoencoder circuit using the loaded weights.
-
-        Args:
-            data (np.ndarray): Input data for the quantum circuit.
-            labels (np.ndarray): Truth Labels for the input data.
-            loss_fn (Callable): Loss function to calculate the quantum cost.
-
-        Returns:
-            Tuple[float, float]: Inference MSE loss and classifier scores.
-        """
-
-        #print("Running in inference mode \n No batching will be performed so don't expect a progress bar")
-        if self.current_weights is None:
-            raise ValueError('Weights not initialized. Load a model first by calling load_weights(model_path)')       
-        costs,scores=loss_fn(self.current_weights,inputs=data,labels=labels,quantum_circuit=self.circuit,return_scores=True,loss_type=loss_type)
-        print("Done")
-        return costs,scores
-    
-class QuantumTrainer():
-    """
-    A class for training a given quantum circuit.
-
-    Args:
-        model (QuantumClassifier): The quantum autoencoder model to be trained.
-        lr (float): Learning rate for the optimizer.
-        optimizer (Callable): The optimizer used for training.
-        loss_fn (Callable): The loss function used for optimization.
-        save (bool): Whether to save the trained model and checkpoints.
-        train_max_n (int): Maximum number of training samples.
-        valid_max_n (int): Maximum number of validation samples.
-        epochs (int): Number of training epochs.
-        patience (int): Patience for early stopping.
-        kwargs (dict): Additional keyword arguments for training.
-    """
-    def __init__(self, model: QuantumClassifier, lr: float = 0.001, optimizer: Callable = None, 
-                 loss_fn: Callable = None, save: bool = True, train_max_n: int = 100000, 
-                 valid_max_n: int = 20000, epochs: int = 20, patience: int = 2, \
-                    improv:float=0.01,wandb=None, lr_decay:bool=False,loss_type='BCE',**kwargs: Any) -> None:
-        self.circuit=model.fetch_circuit()
-        self.backend=model.fetch_backend()
-        self.init_weights=kwargs['init_weights']
-        self.batch_size=kwargs['batch_size'] or 1000
-        self.logger=kwargs['logger']
-        self.train_max_n=train_max_n
-        self.valid_max_n=valid_max_n
-        self.lr_decay=lr_decay
-        self.epochs=epochs
-        self.patience=patience
-        self.saving=save
-        self.current_weights=self.init_weights
-        self.optim=optimizer
-        self.quantum_loss=loss_fn
-        self.loss_type=loss_type
-        self.current_epoch=0
-        self.improv=improv
-        self.is_evictable=False
-        self.wandb=wandb
-        self.history={'train':[],'val':[],'auc':[]}
-        print (f'Performing optimization with: {self.optim} | Setting Learning rate: {lr}')
-        print ('Backend:',self.backend,'\n')
-
-    def iteration(self,data: np.ndarray, labels: np.ndarray, train: bool = False) -> Union[float, Tuple[float, float]]:
-        """
-        Performs a single training or validation iteration.
-
-        Args:
-            data (np.ndarray): Batch of input data.
-            train (bool): Whether to perform training (True) or validation (False).
-
-        Returns:
-            Union[float, Tuple[float, float]]: Training loss (or validation loss and fidelity).
-        """
-        if train:
-            self.current_weights, cost = self.optim.step_and_cost(self.quantum_loss,self.current_weights,\
-                                                                  inputs=data, labels=labels, quantum_circuit=self.circuit,loss_type=self.loss_type)
-            #print(grads.shape)
-            return float(cost)
-        else: 
-            cost,scores=self.quantum_loss(self.current_weights,inputs=data, labels=labels, \
-                                          quantum_circuit=self.circuit,return_scores=True,loss_type=self.loss_type)
-            
-            return float(cost),float(scores)
-    def is_evictable_job(self,seed:bool=None):
-        """
-        Marks the current job as evictable and enables copying of checkpoints to EOS.
-
-        Args:
-            seed (int, optional): Random seed for checkpoint saving. Defaults to None.
-        """
-        self.is_evictable=True
-        self.seed=seed
-    
-    def run_training_loop(self,train_loader:DataLoader,val_loader:DataLoader):
-        """
-        Executes the full training loop, including training and validation.
-
-        Args:
-            train_loader (Any): DataLoader for the training dataset.
-            val_loader (Any): DataLoader for the validation dataset.
-
-        Returns:
-            Dict[str, List[float]]: Training and validation history (losses and accuracies).
-        """
-        self.print_params('Initial weights: ')
-        n_decays=0
-        last_decay=0
-        COMPLETE=False
-        for n_epoch in tqdm(range(self.epochs+1)):
-            sample_counter=0
-            batch_yield=0
-            self.current_epoch=n_epoch
-            
-            losses=0.
-            if (n_epoch>4):
-                recent_val_metrics = self.history['auc'][-2:]
-                previous_val_metric = self.history['auc'][-3]
-                improvement = (np.mean(recent_val_metrics) - previous_val_metric)
-
-                if improvement < self.improv:
-                    # Handle learning rate decay
-                    if self.lr_decay:
-                        if (n_decays < self.patience) and ((n_epoch - last_decay) >= 2):
-                            last_decay = self.current_epoch
-                            n_decays += 1
-                            self.optim.stepsize *= 0.5  # Use a parameter if needed
-                            self.logger.info(f'No improvement observed over last 3 epochs. \n Learning rate decayed to {self.optim.stepsize} at epoch {n_epoch}')
-                        elif n_decays >= self.patience:
-                            self.logger.info(f"\n\n No improvement over last 3 epochs and {self.patience} decay steps. Early stopping! \n\n")
-                            self.save(self.save_dir, name='trained_model.pickle')
-                            COMPLETE=True
-                            break
-                    else:
-                        # Early stopping without decay
-                        self.logger.info(f"\n\n No improvement over last 3 epochs. Early stopping! \n\n")
-                        self.save(self.save_dir, name='trained_model.pickle')
-                        COMPLETE=True
-                        break
-                    
-            if n_epoch>0:
-                print("Start Training")  
-                start=round(time.time(),2)
-                
-                for data,labels in tqdm(train_loader,total=int(self.train_max_n/self.batch_size)):
-                    sample_counter+=data.shape[0]
-                    batch_yield+=1
-                    loss=self.iteration(data,labels=labels,train=True)
-                    losses+=loss
-                    if self.wandb is not None:
-                        self.wandb.log({'train_loss': losses/batch_yield})
-                end=round(time.time(),2)
-                train_loss=losses/batch_yield
-                self.print_params('Current weights: \n\n')
-                print ('Now validating!')
-            else:
-                print ('Running initial validation pass')
-            ### Validation pass ###
-            val_loss=0.
-            val_batch_yield=0
-            val_score=[]
-            val_labels=[]
-            for data,labels in tqdm(val_loader,total=int(self.valid_max_n/self.batch_size)):
-                loss,score=self.iteration(data,labels=labels,train=False)
-                val_loss+=loss
-                val_score.append(score)
-                val_labels.append(labels)
-                val_batch_yield+=1
-            val_loss=val_loss/val_batch_yield
-            val_labels=np.array(val_labels).flatten()
-            val_score=np.array(val_score).flatten()
-            val_auc=roc_auc_score(val_labels,val_score)
-            print("Val shape:", val_score.shape)
-            val_std=np.std(val_score)
-            val_score=np.mean(val_score)
-            if self.wandb is not None:
-                self.wandb.log({'val_loss': val_loss})
-                self.wandb.log({'val_auc': val_auc})
-            #print (f'Epoch {n_epoch}: Train Loss:{train_loss} Val loss: {val_loss}')
-            if n_epoch>0:
-                self.logger.info(f'Epoch {n_epoch}: Network with {len(auto_wires)} input qubits trained on {sample_counter} samples in {batch_yield} batches')
-                self.logger.info(f'Epoch {n_epoch}: Train Loss = {train_loss:.3f} | Val loss = {val_loss:.3f} | Val preds mean and std = {val_score:.3f} , {val_std:.3f}\
-                | Val AUC = {val_auc:.3f} \n Time taken = {end-start:.3f} seconds \n\n')
-                
-                self.history['train'].append(train_loss)
-
-            else:
-                self.logger.info(f'Initial validation pass completed')
-                self.logger.info(f'Epoch {n_epoch} (No training performed): Val loss = {val_loss:.3f} | Val AUC = {val_auc:.3f} | Val preds mean and std = {val_score:.3f} , {val_std:.3f}\n\n')
-            self.history['val'].append(val_loss)
-            self.history['auc'].append(val_auc)
-            if self.saving:
-                if (n_epoch==self.epochs):
-                    name='trained_model.pickle'
-                elif n_epoch==0:
-                    name='init_weights.pickle'
-                else:
-                    name=None
-                self.save(self.save_dir,name=name)
-                if (self.is_evictable)&(n_epoch>0):
-                    print ('Will copy over checkpoints')
-                    name='ep{:02}.pickle'.format(self.current_epoch)
-                    try:
-                        # Fetch the seed by splitting the save_dir - last directory in tree should be the seed
-                        tmpfile=f"{os.environ['EOS_MGM_URL']}://eos/user/{os.environ['CERN_USERNAME'][0]}/{os.environ['CERN_USERNAME']}/QML/checkpoint_dumps/{self.seed}/{name}"
-                        exec=os.path.join(os.environ['BELLE2_EXEC'],'xrdcp')
-                        subprocess.call(f'{exec} {os.path.join(self.checkpoint_dir,name)} {tmpfile}',shell=True)
-                    except:
-                        print("Failed to copy over checkpoints")
-                        pass
-        if not COMPLETE:
-            # pickle the history
-            ut.Pickle(self.history,'history.pickle',path=self.save_dir)
-        return self.history
-    
-    def print_params(self,prefix: Optional[str]=None) -> None:
-        """
-        Prints the current parameters (weights) of the quantum autoencoder.
-
-        Args:
-            prefix (Optional[str]): An optional prefix to print before the parameters. 
-                                    Defaults to None.
-        """
-        if prefix is not None: print (prefix)
-        print('autograd weights:',self.current_weights,'\n')
-        
-    def save(self, save_dir: str, name: Optional[str] = None) -> None:
-        """
-        Saves the model weights to a specified directory.
-
-        Args:
-            save_dir (str): Directory where the model weights will be saved.
-            name (Optional[str]): The name of the file to save. Defaults to None.
-                                If not provided, the file name will be based on the current epoch.
-        """
-        opt_name=None
-        if name is None:
-            if self.current_epoch>100: 
-                name = 'ep{:03}.pickle'.format(self.current_epoch)
-                opt_name='optimizer_ep{:03}.json'.format(self.current_epoch)
-            else:
-                name='ep{:02}.pickle'.format(self.current_epoch)
-                opt_name='optimizer_ep{:02}.json'.format(self.current_epoch)
-        if 'trained' not in name: save_dir=self.checkpoint_dir
+        if self.current_weights is not None:
+            print('Current weights: \\n\\n', self.current_weights.numpy())
         else:
-            opt_name='optimizer.json'
-        ut.Pickle({'weights':self.current_weights},name,path=save_dir)
-        try:
-            optim_dict={'stepsize':self.optim.stepsize,'beta1':self.optim.beta1,'beta2':self.optim.beta2,'epsilon':self.optim.eps,\
-                        'fm':self.optim.fm,'sm':self.optim.sm,'t':self.optim.t}
-            # save dict to json file
-            import json
-            with open(os.path.join(save_dir,opt_name), 'w') as f:
-                json.dump(optim_dict, f)
-            print("Optimizer state saved")
-        except Exception as e:
-            print(f"Error saving optimizer state: {str(e)}")
+            print("Weights not loaded or initialized.")
 
-        #print(f"Model saved to {os.path.join(save_dir,name)}")
-    def get_current_epoch(self) -> None:
+    def run_circuit_once(self, single_input_instance: tf.Tensor) -> tf.Tensor:
         """
-        Returns the current epoch number during training.
-
+        Runs the SF circuit for a single input instance using the current weights.
+        Args:
+            single_input_instance (tf.Tensor): A single data instance, shape [num_qumodes, num_features].
         Returns:
-            int: The current epoch number.
+            tf.Tensor: The measurement results from the circuit (e.g., mean photon numbers).
         """
+        if self.current_weights is None:
+            raise ValueError("Weights not initialized. Load or set weights first.")
+        if not isinstance(single_input_instance, tf.Tensor):
+            single_input_instance = tf.convert_to_tensor(single_input_instance, dtype=tf.float32)
+
+        prog = self.sf_circuit_template_fn(self.current_weights, single_input_instance)
+        results = self.sf_engine.run(prog)
+        
+        # SF 0.23 with TF backend: results.samples for MeasureMeanPhoton is [1, N_modes_measured]
+        measured_values = results.samples[0] 
+        return tf.cast(measured_values, tf.float32)
+
+    def predict_batch(self, batch_data: tf.Tensor) -> tf.Tensor:
+        """
+        Runs inference on a batch of data using tf.map_fn.
+        Args:
+            batch_data (tf.Tensor): Batch of input data, shape [batch_size, num_qumodes, num_features].
+        Returns:
+            tf.Tensor: Circuit outputs for the batch, shape [batch_size, num_measured_modes].
+        """
+        if not isinstance(batch_data, tf.Tensor):
+            batch_data = tf.convert_to_tensor(batch_data, dtype=tf.float32)
+        
+        # Define the output signature for tf.map_fn
+        # num_measured_modes depends on the circuit, here it's min(len(auto_wires), 3)
+        if auto_wires is None: # Should be initialized
+            raise ValueError("auto_wires not initialized. Call initialize() first.")
+        num_measured_modes = min(len(auto_wires), 3)
+        output_signature = tf.TensorSpec(shape=[num_measured_modes], dtype=tf.float32)
+
+        batch_outputs = tf.map_fn(self.run_circuit_once, batch_data, fn_output_signature=output_signature)
+        return batch_outputs
+
+    def get_predictions(self, data: np.ndarray) -> np.ndarray:
+        """
+        Gets raw predictions from the model for the given data.
+        Args:
+            data (np.ndarray): Input data, assumed to be preprocessed to [num_samples, num_qumodes, num_features].
+        Returns:
+            np.ndarray: Model outputs (e.g., mean photon numbers).
+        """
+        if self.current_weights is None:
+            raise ValueError('Weights not initialized. Load a model first by calling load_weights(model_path)')
+        
+        data_tf = tf.convert_to_tensor(data, dtype=tf.float32)
+        
+        # Basic check for input shape if auto_wires is initialized
+        if auto_wires is not None and data_tf.shape.rank == 3:
+            if data_tf.shape[1] != len(auto_wires):
+                 print(f"Warning: Input data's second dimension ({data_tf.shape[1]}) does not match number of auto_wires ({len(auto_wires)}).")
+        elif data_tf.shape.rank != 3:
+            print(f"Warning: Input data rank is {data_tf.shape.rank}, expected 3 ([batch, qumodes, features]).")
+
+
+        predictions_tf = self.predict_batch(data_tf)
+        return predictions_tf.numpy()
+
+class QuantumTrainer:
+    """
+    A class for training the QuantumClassifier using Strawberry Fields and TensorFlow.
+    """
+    def __init__(self, model: QuantumClassifier, 
+                 optimizer_tf: tf.keras.optimizers.Optimizer, 
+                 loss_fn_tf: Callable[[tf.Tensor, tf.Tensor], tf.Tensor], 
+                 save: bool = True, epochs: int = 20, patience: int = 2,
+                 improv: float = 0.01, wandb_run: Optional[Any] = None, 
+                 batch_size: int = 32, logger: Optional[Any] = None, 
+                 init_weights_val: Optional[np.ndarray] = None, 
+                 save_dir_path: str = "saved_models_sf",
+                 **kwargs: Any) -> None: # Removed lr_decay, loss_type as they are handled by optimizer and loss_fn_tf
+        
+        self.model = model
+        self.optimizer = optimizer_tf
+        self.loss_function = loss_fn_tf 
+
+        if init_weights_val is not None:
+            if self.model.current_weights is None:
+                self.model.current_weights = tf.Variable(initial_value=init_weights_val, trainable=True, dtype=tf.float32, name="circuit_weights_trainer_init")
+            else: 
+                self.model.current_weights.assign(init_weights_val)
+                if not self.model.current_weights.trainable: 
+                    self.model.current_weights = tf.Variable(initial_value=self.model.current_weights.numpy(), trainable=True, dtype=tf.float32, name="circuit_weights_trainer_reinit_trainable")
+        elif self.model.current_weights is None:
+            raise ValueError("QuantumTrainer: model.current_weights are None and no init_weights_val provided. Initialize or load weights into the model first.")
+        elif not self.model.current_weights.trainable:
+            # If weights are loaded but marked non-trainable, make them trainable for the trainer
+            print("Warning: Model weights were non-trainable. Recreating as trainable for the QuantumTrainer.")
+            self.model.current_weights = tf.Variable(initial_value=self.model.current_weights.numpy(), trainable=True, dtype=tf.float32, name="circuit_weights_trainer_make_trainable")
+
+
+        self.batch_size = batch_size
+        self.logger = logger 
+        self.epochs = epochs
+        self.patience = patience
+        self.saving = save
+        self.current_epoch = 0
+        self.improv = improv
+        self.is_evictable = False 
+        self.seed = None 
+        self.wandb_run = wandb_run 
+        self.history: Dict[str, List[float]] = {'train_loss': [], 'val_loss': [], 'val_auc': []} 
+
+        self.save_dir = save_dir_path
+        self.checkpoint_dir = os.path.join(self.save_dir, 'checkpoints_sf')
+        pathlib.Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
+
+        if self.logger:
+            self.logger.info(f"QuantumTrainer initialized. Optimizer: {self.optimizer.get_config()}")
+            self.logger.info(f"Model weights trainable: {self.model.current_weights.trainable}")
+
+    @tf.function 
+    def train_step(self, batch_inputs: tf.Tensor, batch_labels: tf.Tensor) -> tf.Tensor:
+        """Performs a single training step."""
+        with tf.GradientTape() as tape:
+            predictions = self.model.predict_batch(batch_inputs)
+            loss = self.loss_function(batch_labels, predictions)
+
+        gradients = tape.gradient(loss, [self.model.current_weights]) 
+        self.optimizer.apply_gradients(zip(gradients, [self.model.current_weights]))
+        return loss
+
+    @tf.function
+    def validation_step(self, batch_inputs: tf.Tensor, batch_labels: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+        """Performs a single validation step."""
+        predictions = self.model.predict_batch(batch_inputs)
+        loss = self.loss_function(batch_labels, predictions)
+        return loss, predictions
+
+    def run_training_loop(self, train_dataset: tf.data.Dataset, val_dataset: tf.data.Dataset, 
+                          steps_per_epoch_train: Optional[int] = None, 
+                          steps_per_epoch_val: Optional[int] = None):
+        """
+        Executes the full training loop.
+        Args:
+            train_dataset (tf.data.Dataset): Batched training dataset.
+            val_dataset (tf.data.Dataset): Batched validation dataset.
+            steps_per_epoch_train (Optional[int]): Number of steps per training epoch. If None, iterates full dataset.
+            steps_per_epoch_val (Optional[int]): Number of steps per validation epoch. If None, iterates full dataset.
+        """
+        if self.logger: self.logger.info("Starting training loop...")
+        if self.model.current_weights is None:
+            raise ValueError("Model weights not initialized before training.")
+        if not self.model.current_weights.trainable:
+            self.logger.error("CRITICAL: Model weights are not trainable at the start of run_training_loop. Training will not update weights.")
+            # This is a critical issue, so we might want to stop or force them trainable if that's intended.
+            # Forcing trainable here:
+            # self.model.current_weights = tf.Variable(self.model.current_weights.numpy(), trainable=True, name="force_trainable_in_loop")
+            # self.logger.info("Forced model weights to be trainable.")
+            return # Or raise error
+
+        best_val_loss = float('inf')
+        patience_counter = 0
+
+        for epoch in range(self.current_epoch, self.epochs):
+            self.current_epoch = epoch
+            epoch_start_time = time.time()
+            
+            total_train_loss = 0.0
+            train_steps_taken = 0
+            for step, (batch_x, batch_y) in enumerate(train_dataset if steps_per_epoch_train is None else train_dataset.take(steps_per_epoch_train)):
+                train_loss = self.train_step(batch_x, batch_y)
+                total_train_loss += train_loss.numpy()
+                train_steps_taken +=1
+                if self.logger and (step % 10 == 0): 
+                    self.logger.info(f"Epoch {epoch+1}/{self.epochs}, Step {step+1}/{steps_per_epoch_train or 'all'}, Train Loss: {train_loss.numpy():.4f}")
+            
+            if train_steps_taken == 0:
+                self.logger.warning(f"Epoch {epoch+1}: No training steps were taken. Check train_dataset and steps_per_epoch_train.")
+                avg_train_loss = 0.0
+            else:
+                avg_train_loss = total_train_loss / train_steps_taken
+            self.history['train_loss'].append(avg_train_loss)
+
+            total_val_loss = 0.0
+            val_steps_taken = 0
+            # all_val_labels_list = # For AUC
+            # all_val_predictions_list = # For AUC
+            for batch_x_val, batch_y_val in enumerate(val_dataset if steps_per_epoch_val is None else val_dataset.take(steps_per_epoch_val)):
+                val_loss, predictions = self.validation_step(batch_x_val, batch_y_val) # predictions are tf.Tensor
+                total_val_loss += val_loss.numpy()
+                val_steps_taken +=1
+                # all_val_labels_list.append(batch_y_val.numpy())
+                # all_val_predictions_list.append(predictions.numpy())
+
+            if val_steps_taken == 0:
+                self.logger.warning(f"Epoch {epoch+1}: No validation steps were taken. Check val_dataset and steps_per_epoch_val.")
+                avg_val_loss = float('inf') # Or handle as error
+            else:
+                avg_val_loss = total_val_loss / val_steps_taken
+            self.history['val_loss'].append(avg_val_loss)
+            
+            # AUC Calculation (example, needs sklearn and adaptation)
+            val_auc = -1.0 # Default if not calculated
+            # if val_steps_taken > 0 and False: # Disabled for now
+            #     try:
+            #         from sklearn.metrics import roc_auc_score
+            #         val_labels_np = np.concatenate(all_val_labels_list, axis=0)
+            #         val_predictions_np = np.concatenate(all_val_predictions_list, axis=0)
+            #         # Adjust shapes if necessary for roc_auc_score
+            #         if val_labels_np.ndim > 1 and val_labels_np.shape[1] == 1: val_labels_np = val_labels_np.flatten()
+            #         if val_predictions_np.ndim > 1 and val_predictions_np.shape[1] == 1: val_predictions_np = val_predictions_np.flatten() # Assuming prediction is a single score for binary
+            #         val_auc = roc_auc_score(val_labels_np, val_predictions_np)
+            #         self.history['val_auc'].append(val_auc)
+            #     except ImportError:
+            #         if self.logger: self.logger.warning("scikit-learn not available, AUC not calculated.")
+            #     except Exception as e:
+            #         if self.logger: self.logger.error(f"Error calculating AUC: {e}")
+            # else:
+            #     self.history['val_auc'].append(val_auc) # Append default if not calculated
+
+
+            epoch_duration = time.time() - epoch_start_time
+            log_msg = (f"Epoch {epoch+1}/{self.epochs} - "
+                       f"Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}, "
+                       f"Val AUC: {val_auc:.4f} (Note: AUC calc needs review), " 
+                       f"Duration: {epoch_duration:.2f}s")
+            if self.logger: self.logger.info(log_msg)
+            if self.wandb_run:
+                self.wandb_run.log({
+                    "epoch": epoch + 1, "train_loss": avg_train_loss, "val_loss": avg_val_loss,
+                    "val_auc": val_auc, "epoch_duration_s": epoch_duration
+                })
+
+            if avg_val_loss < best_val_loss - self.improv:
+                best_val_loss = avg_val_loss
+                patience_counter = 0
+                if self.saving:
+                    self.save_model_weights(epoch_identifier=f"epoch_{epoch+1}_best")
+            else:
+                patience_counter += 1
+
+            if patience_counter >= self.patience:
+                if self.logger: self.logger.info(f"Early stopping triggered at epoch {epoch+1}.")
+                break
+        
+        if self.saving: 
+            self.save_model_weights(epoch_identifier="final_model")
+        if self.logger: self.logger.info("Training loop finished.")
+        return self.history
+
+    def print_params(self, prefix: Optional[str] = None) -> None:
+        if prefix: print(prefix)
+        if self.model.current_weights is not None:
+            print('Model weights (numpy):\\n', self.model.current_weights.numpy())
+        else:
+            print("Model weights not set.")
+        
+    def save_model_weights(self, epoch_identifier: str) -> None:
+        """Saves the model weights as a pickle file."""
+        if self.model.current_weights is None:
+            if self.logger: self.logger.warning("Attempted to save model, but weights are None.")
+            return
+
+        file_name = f"model_weights_{epoch_identifier}.pickle"
+        save_path = os.path.join(self.checkpoint_dir, file_name)
+        
+        weights_to_save = {'weights': self.model.current_weights.numpy()}
+        ut.Pickle(weights_to_save, file_name, path=self.checkpoint_dir)
+
+        if self.logger:
+            self.logger.info(f"Model weights saved to {save_path}")
+
+    def get_current_epoch(self) -> int:
         return self.current_epoch
-    def set_current_epoch(self,epoch:int)->None:
-        """
-        Sets the current epoch number if training is resumed from a checkpoint.
 
-        Args:
-            epoch (int): The epoch number to set.
-        """
-        self.current_epoch=epoch+1
-        print("Resume training from epoch:",epoch+1)
-    def set_directories(self,save_dir: str) -> None:
-        """
-        Sets up directories for saving model checkpoints and logs.
+    def set_current_epoch(self, epoch: int) -> None:
+        self.current_epoch = epoch
+        if self.logger: self.logger.info(f"Current epoch set to {self.current_epoch}")
 
-        Args:
-            save_dir (str): The directory where model and checkpoints will be saved.
-        """
-        self.save_dir=save_dir
-        self.checkpoint_dir=os.path.join(save_dir,'checkpoints')
-        pathlib.Path(self.checkpoint_dir).mkdir(parents=True,exist_ok=True)
-    
     def fetch_history(self) -> Dict[str, List[float]]:
-        """
-        Fetches the history of training and validation losses and accuracies.
-
-        Returns:
-            Dict[str, List[float]]: A dictionary containing the history of training and 
-                                    validation losses and accuracies.
-        """
         return self.history
 
 
