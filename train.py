@@ -13,184 +13,155 @@ import helpers.path_setter as ps
 import quantum.losses as loss
 from loguru import logger
 import wandb
+import tensorflow as tf
+import numpy as np
+import tqdm
+import quantum.architectures as qc
 
-@hydra.main(config_path="./hydra_configs/", config_name="config")
+# Limit TensorFlow's thread usage to be a good citizen on shared servers.
+NUM_THREADS = 8
+tf.config.threading.set_inter_op_parallelism_threads(NUM_THREADS)
+tf.config.threading.set_intra_op_parallelism_threads(NUM_THREADS)
+
+@hydra.main(config_path="./hydra_configs/", config_name="config", version_base=None)
 def main(cfg: DictConfig):
     # Set up directories
     base_dir:str=cfg.base_dir
     save_dir = os.path.join(cfg.save_dir, cfg.seed)
     plot_dir = os.path.join(save_dir, 'plots')
     pathlib.Path(plot_dir).mkdir(parents=True, exist_ok=True)
-    assert cfg.batch_size==1, "Batch size must be 1 for this model"
+    pathlib.Path(os.path.join(save_dir, 'checkpoints_sf')).mkdir(parents=True, exist_ok=True)
+
     # Initialize WandB
-    try:
-        run_str=f"{os.getlogin()}_{cfg.seed}"
-    except:
-        run_str=f"leo_{cfg.seed}"
-    
-    wandb.init(project="1P1Qm", config=OmegaConf.to_container(cfg), name=run_str,notes=cfg.desc)
-    with open(os.path.join(save_dir, "wandb_run_id.txt"), "w") as f:
-        f.write(wandb.run.id)
+    if cfg.log_wandb:
+        try:
+            run_str=f"{os.getlogin()}_{cfg.seed}"
+        except:
+            run_str=f"default_user_{cfg.seed}"
+        wandb.init(project="1P1Qm", config=OmegaConf.to_container(cfg), name=run_str,notes=cfg.desc)
+        with open(os.path.join(save_dir, "wandb_run_id.txt"), "w") as f:
+            f.write(wandb.run.id)
 
     # Logging setup
     logger.add(os.path.join(save_dir, 'logs.log'), rotation='10 MB', backtrace=True, diagnose=True, level='DEBUG', mode="w")
     logger.info("########################################### \n\n")
-    logger.info(f"This circuit contains {cfg.wires} qubits")
     
     print("Will save models to: ", save_dir)
 
     # Save initial arguments for logging purposes
     ut.Pickle(cfg, 'args', path=save_dir)
     with open(os.path.join(save_dir, 'args.txt'), 'w+') as f:
-        f.write(repr(cfg))
+        f.write(OmegaConf.to_yaml(cfg))
 
-    # Further setup based on config
-    
-    if cfg.resume:
-        test_args = ut.Unpickle(os.path.join(save_dir, 'args.pickle'))
-        import importlib; qc = importlib.import_module('saved_models.' + cfg.seed + '.FROZEN_ARCHITECTURE')
-        model_path = sorted(glob.glob(os.path.join(save_dir, 'checkpoints', 'ep*.pickle')))[-1]
-        init_weights = ut.Unpickle(model_path)
+    # --- Corrected Initialization ---
+    logger.info("Initializing circuit parameters...")
+    # The circuit template uses 4 params per wire (disp_mag, disp_phase, squeeze_mag, squeeze_phase)
+    # Override the config value if it's incorrect.
+    if cfg.params_per_wire != 4:
+        logger.warning(f"Config `params_per_wire` is {cfg.params_per_wire}, but circuit requires 4. Overriding to 4.")
+        cfg.params_per_wire = 4
+    qc.initialize(wires=cfg.wires, layers=cfg.num_layers, params=cfg.params_per_wire)
 
-        logger.add(os.path.join(cfg.save_dir, 'logs.log'), rotation='10 MB', backtrace=True, diagnose=True, level='DEBUG', mode="a")
-        logger.info("########################################### \n\n")
-        logger.info(f"Resuming training from last checkpoint at {model_path}")
-        logger.info(f"Using arguments specified in original training run")
-        logger.info(f"Training resumed at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
-        logger.info("Current weights are: ", init_weights)
-        logger.info("\n\n ########################################### \n\n")
-        cfg = test_args
-        cfg.seed = str(cfg.seed)
-    else:
-        import quantum.architectures as qc
-        logger.info("########################################### \n\n")
-        logger.info(f"This circuit contains {cfg.wires} qubits")
-        logger.info("\n\n ########################################### \n\n")
+
+
+    if not cfg.resume:
+        logger.info("Starting new training run.")
+        # Save a snapshot of the code for reproducibility
         tmpfile = os.path.join(save_dir, 'FROZEN_ARCHITECTURE.py')
         subprocess.run(['cp', os.path.join(base_dir,'quantum/architectures.py') ,tmpfile])
         tmpfile = os.path.join(save_dir, 'FROZEN_DATAREADER.py')
         subprocess.run(['cp', os.path.join(base_dir,'case_reader.py'), tmpfile])
         tmpfile = os.path.join(save_dir, 'FROZEN_LOSS.py')
         subprocess.run(['cp', os.path.join(base_dir,'quantum/losses.py'), tmpfile])
-        # delete checkpoint directory contents
-        try:
-            subprocess.run(['rm','-r', os.path.join(save_dir, 'checkpoints')])
-        except:
-            pass
-        
-    logger.info(f"Feature are scaled to the following limits: {ut.feature_limits}")
 
-    if cfg.norm_pt:
-        logger.info(f"pT will not be scaled to the above limit. Will be normalized using 1/jet_pt")
-    else:
-        logger.info(f"pT will also be scaled assuming above maxima")
-    if cfg.flat:
-        logger.info("Using flat mjj distribution for training")
-    if cfg.loss=='prob':
-        cost_fn=loss.probabilistic_loss#loss.VQC_cost
-    else:
-        cost_fn=loss.VQC_cost
-    VQC = qc.QuantumClassifier(wires=cfg.wires, shots=cfg.shots,dev_name=cfg.device_name,layers=cfg.num_layers,params=cfg.params_per_wire)
-    VQC.set_circuit(circuit_type=cfg.circuit_type)
-
-    if cfg.extra_weights>4:
-        print("No. of extra weights = ",cfg.extra_weights)
-        print("Are you sure? Press ctrl+c to cancel within 5s")
-        time.sleep(5)
-
-    NUM_WEIGHTS = len(qc.auto_wires)*cfg.params_per_wire*cfg.num_layers+cfg.extra_weights # Extra weight for the bias term in VQC + scale factor for pT
+    # --- Instantiate Model ---
+    if cfg.cutoff_dimension is None:
+        raise ValueError("Configuration 'cutoff_dimension' cannot be null; it is required for the Fock backend.")
     
-    if not cfg.resume:
-        init_weights = qc.np.float64(qc.np.random.uniform(0, qc.np.pi, size=(NUM_WEIGHTS,), requires_grad=True))
-        init_weights[-cfg.extra_weights:] = 1.
-        #init_weights = qc.np.ones((NUM_WEIGHTS,), requires_grad=True)*qc.np.pi/2.
-        #init_weights[-cfg.extra_weights:]=qc.np.pi/2.
-        #init_weights[-1]=0.
-        #init_weights[-1]=0.0
-    train_max_n = cfg.train_n
-    valid_max_n = cfg.valid_n
+    model = qc.QuantumClassifier(wires=cfg.wires, cutoff_dim=cfg.cutoff_dimension)
+
+    # --- Weights Initialization ---
+    # The circuit template uses weights[-3] for scaling, so we need at least 3 extra weights.
+    if cfg.extra_weights < 3:
+        logger.warning(f"Config `extra_weights` is {cfg.extra_weights}, but circuit requires at least 3. Setting to 3.")
+        cfg.extra_weights = 3
     
-    qc.print_training_params()
+    NUM_WEIGHTS = len(qc.auto_wires) * cfg.params_per_wire * cfg.num_layers + cfg.extra_weights
+    logger.info(f"Circuit requires {NUM_WEIGHTS} weights.")
+    init_weights = np.random.uniform(0, np.pi, size=(NUM_WEIGHTS,)).astype(np.float32)
 
-    # Save initial arguments for logging purposes
-    ut.Pickle(cfg, 'args', path=save_dir)
-    with open(os.path.join(save_dir, 'args.txt'), 'w+') as f:
-        f.write(repr(cfg))
 
-    # Load the data and create a dataloader
-    data_key='VQC_train'
-    val_key='VQC_val'
+    # --- Optimizer and Loss ---
+    optimizer = tf.keras.optimizers.Adam(learning_rate=cfg.lr)
+    if cfg.loss == 'MSE':
+        loss_fn = loss.mean_squared_error
+    elif cfg.loss == 'BCE':
+        loss_fn = loss.binary_crossentropy
+    else:
+        raise ValueError(f"Unsupported loss type: {cfg.loss}")
+
+    # --- Trainer ---
+    logger.info("Instantiating QuantumTrainer...")
+    trainer = qc.QuantumTrainer(
+        model=model,
+        optimizer_tf=optimizer,
+        loss_fn_tf=loss_fn,
+        init_weights_val=init_weights,
+        epochs=cfg.epochs,
+        batch_size=cfg.batch_size,
+        logger=logger,
+        save=cfg.save,
+        patience=cfg.patience,
+        improv=cfg.improv,
+        wandb_run=wandb.run if cfg.log_wandb else None,
+        save_dir_path=save_dir
+    )
+
+    if cfg.resume:
+        # NOTE: Resuming logic for this custom trainer needs to be implemented.
+        # For now, it will just start a new training run with the loaded config.
+        pass
+
+
+    # --- Data Loading ---
+    data_key='VPC_train'
+    val_key='VPC_val'
     
     logger.info(f'loading data from {ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key)}')
     train_filelist = sorted(glob.glob(os.path.join(ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key), '*.h5')))
     val_filelist = sorted(glob.glob(os.path.join(ps.PathSetter(data_path=cfg.data_dir).get_data_path(val_key), '*.h5')))
 
     if (len(train_filelist) == 0) or (len(val_filelist) == 0):
-        raise FileNotFoundError(f"Could not find files in {ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key)} or {ps.PathSetter(data_path=cfg.data_dir).get_data_path(val_key)}")
+        raise FileNotFoundError(f"Could not find files in the specified data directories.")
 
-    logger.info(f"Training on {len(train_filelist)} files found at {ps.PathSetter(data_path=cfg.data_dir).get_data_path(data_key)}")
-    logger.info(f"Validating on {len(val_filelist)} files found at {ps.PathSetter(data_path=cfg.data_dir).get_data_path(val_key)}")
+    logger.info(f"Training on {len(train_filelist)} files, validating on {len(val_filelist)} files.")
 
-    train_loader = cr.OneP1QDataLoader(filelist=train_filelist, batch_size=cfg.batch_size, input_shape=(len(qc.auto_wires), 3), train=True,
-                                            max_samples=train_max_n, normalize_pt=cfg.norm_pt, logger=logger,dataset=cfg.dataset)
-    val_loader = cr.OneP1QDataLoader(filelist=val_filelist, batch_size=cfg.batch_size, input_shape=(len(qc.auto_wires), 3), train=False,
-                                          max_samples=valid_max_n, normalize_pt=cfg.norm_pt, dataset=cfg.dataset)
+    train_loader = cr.OneP1QDataLoader(filelist=train_filelist, batch_size=cfg.batch_size, input_shape=(cfg.wires, 3), train=True,
+                                            max_samples=cfg.train_n, normalize_pt=cfg.norm_pt, logger=logger,dataset=cfg.dataset)
+    val_loader = cr.OneP1QDataLoader(filelist=val_filelist, batch_size=cfg.batch_size, input_shape=(cfg.wires, 3), train=False,
+                                          max_samples=cfg.valid_n, normalize_pt=cfg.norm_pt, dataset=cfg.dataset)
 
-    # Initialize the optimizer
-    optimizer = qc.qml.AdamOptimizer(stepsize=cfg.lr)
 
-    # Initialize the trainer with WandB
-    trainer = qc.QuantumTrainer(VQC, lr=cfg.lr, backend_name=cfg.backend, init_weights=init_weights, device_name=cfg.device_name,
-                                train_max_n=train_max_n, valid_max_n=valid_max_n, epochs=cfg.epochs, batch_size=cfg.batch_size,
-                                logger=logger, save=cfg.save, patience=cfg.patience, optimizer=optimizer,improv=cfg.improv,\
-                                      loss_fn=cost_fn,lr_decay=cfg.lr_decay, wandb=wandb,loss_type=cfg.loss)
 
-    trainer.print_params('Initialized parameters!')
-    trainer.set_directories(save_dir)
+    # --- Pre-run Confirmation ---
+    logger.info("--- Training Configuration ---")
+    logger.info(f"Epochs: {cfg.epochs}, Batch Size: {cfg.batch_size}, Learning Rate: {cfg.lr}")
+    logger.info(f"Wires: {cfg.wires}, Layers: {cfg.num_layers}, Params per Wire: {cfg.params_per_wire}, (Cutoff): {cfg.cutoff_dimension}")
+    logger.info(f"Loss Function: {cfg.loss}, Using Flat Data: {cfg.flat}")
+    logger.info("-----------------------------")
+    confirm = input("Press Enter to begin training or 'q' to quit: ")
+    if confirm.lower() == 'q':
+        logger.warning("Training cancelled by user.")
+        return
 
-    if cfg.resume:
-        trainer.set_current_epoch(ut.get_current_epoch(model_path))
-        logger.info(f"Resuming training from epoch {trainer.current_epoch}")
-    else:
-        logger.info(f"Training started at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
-        logger.info(f'Epochs: {cfg.epochs} | Learning rate: {cfg.lr} | Batch size: {cfg.batch_size} \nBackend: {cfg.backend} | Wires: {cfg.wires} | Shots: {cfg.shots} \n')    
-        logger.info(f'Additional information: {cfg.desc}')
+    # --- Training ---
+    trainer.run_training_loop(
+        train_loader=train_loader,
+        val_loader=val_loader
+    )
 
-    if cfg.evictable:
-        trainer.is_evictable_job(seed=cfg.seed)
-
-    # Begin training
-    abs_start = time.time()
-    try:
-        history = trainer.run_training_loop(train_loader, val_loader)
-    except KeyboardInterrupt:
-        print("WHYYYYY")
-        print("DON'T PRESS CTRL+C AGAIN. I'M TRYING TO SAVE THE CURRENT MODEL AND WRITE TO LOG!")
-        trainer.save(save_dir, name='aborted_weights.pickle')
-        trainer.print_params('Training aborted. Current parameters are: ')
-    finally:
-        logger.info('Training completed with the following parameters:')
-        trainer.print_params('Trained parameters:')
-        history = trainer.fetch_history()
-        print(history)
-        if cfg.save:
-            done_epochs = len(history['train'])
-            ut.Pickle(history, 'history', path=save_dir)
-            fig, axes = plt.subplots(figsize=(15, 12))
-            axes.plot(qc.np.arange(done_epochs), history['train'], label='train', linewidth=2)
-            axes.plot(qc.np.arange(done_epochs + 1), history['val'], label='val', linewidth=2)
-            axes.set_xlabel('Epochs', size=25)
-            axes.set_ylabel('$1-<T|F> $(in %)', size=25)
-            axes.set_xticks(qc.np.arange(0, done_epochs + 1, 5))
-            axes.legend(prop={'size': 25})
-
-            axes.tick_params(labelsize=20)
-            fig.savefig(os.path.join(save_dir, 'history'))
-            abs_end = time.time()
-            logger.info(f"Training finished at {datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}")
-            logger.info(f"Total time taken including all overheads: {abs_end - abs_start:.2f} seconds")
-
-        # Close WandB run
+    logger.info("Training finished.")
+    if cfg.log_wandb:
         wandb.finish()
 
 if __name__ == "__main__":

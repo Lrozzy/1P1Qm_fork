@@ -1,38 +1,35 @@
-seed: 'base'
+# --- General & Path Configuration ---
+seed: 'sf_1'
 base_dir: '/home/hep/lr1424/1P1Qm_fork/'
-train: true
-dataset: 'jetclass' # or 'delphes' or 'AOJ'
-wires: 4
-shots: 2500
-train_n: 2000
-valid_n: 400
-batch_size: 1
-epochs: 25
-improv: 0.01
-extra_weights: 0
-backend: 'autograd'
-device_name: 'default.gaussian' # or strawberryfields.gaussian 
-lr: 0.05
-num_layers: 1
-params_per_wire: 3
-lr_decay: false
-save: true
-flat: false
-evictable: false
-separate_ancilla: false
-resume: false
-desc: 'Training run'
-norm_pt: false
-substructure: false
-patience: 3
-use_reuploading: false
-loss: 'MSE' # or 'BCE'
 save_dir: '/home/hep/lr1424/1P1Qm_fork/saved_models/'
 data_dir: '/home/hep/lr1424/1P1Qm_fork/'
-dump: '/home/hep/lr1424/1P1Qm_fork/dumps/' # only for testing
-read_n: 2000 # only for testing
-load: false # only for testing
-log_wandb: false # only for testing
-load_best: false # only for testing
-scheme: 'min' # only for testing
-circuit_type: 'normal' # or 'CNN', but this is not really better
+dump: '/home/hep/lr1424/1P1Qm_fork/dumps/' # Inference results
+resume: false # Set to true to resume from the latest checkpoint in save_dir/seed
+desc: 'TensorFlow-based training run'
+save: true # Save model checkpoints during training
+
+# --- Dataset & Preprocessing ---
+dataset: 'jetclass'
+train_n: 2000   # Max number of training samples
+valid_n: 400    # Max number of validation samples
+batch_size: 32  # Batch size for training and validation
+norm_pt: false  # Normalize pT by 1/jet_pt
+flat: false     # Use flat m_jj distribution for training data
+patience: 2
+
+# --- Model Architecture ---
+wires: 4
+cutoff_dimension: 5 # cutoff_dimension
+num_layers: 1
+params_per_wire: 3
+circuit_type: 'normal'
+
+# --- Training Hyperparameters ---
+extra_weights: 16
+epochs: 25
+lr: 0.01
+improv: 0.01
+loss: 'MSE' # 'MSE' for MeanSquaredError or 'BCE' for BinaryCrossentropy
+
+# --- Logging ---
+log_wandb: false
