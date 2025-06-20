@@ -60,116 +60,117 @@ def load_data_from_h5(file_path, max_jets=None, num_particles=4):
     labels = tf.convert_to_tensor(labels, dtype=tf.float32)
     return jet_constituents, labels
 
-def loss_function(y_true, y_pred, type='BCE'):
-    """Calculates the loss between the true and predicted values."""
-    if type == 'MSE':
-        # Expand dims of y_true to allow broadcasting with y_pred's shape [batch, 3]
-        if len(y_true.shape) == 1 and len(y_pred.shape) == 2:
-            y_true = tf.expand_dims(y_true, 1)
-        return tf.reduce_mean(tf.square(y_true - y_pred))
-    elif type == 'BCE':
-        # For BCE, reduce y_pred to a single score per instance (e.g., sum or mean)
-        if len(y_pred.shape) == 2:
-            y_pred_score = tf.reduce_sum(y_pred, axis=1)
-        else:
-            y_pred_score = y_pred
-        # Ensure y_true shape matches y_pred_score
-        if len(y_true.shape) > 1:
-            y_true = tf.squeeze(y_true)
-        bce = tf.keras.losses.BinaryCrossentropy(from_logits=False)
-        return bce(y_true, y_pred_score)
-    else:
-        raise ValueError(f"Unsupported loss type: {type}")
+def loss_function(y_true, y_pred):
+    """Calculates the Binary Cross-Entropy loss from logits."""
+    bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+    return bce(y_true, y_pred)
 
-def sf_circuit_template(weights: tf.Tensor, inputs: tf.Tensor) -> sf.Program:
-    """
-    Defines the CV quantum circuit using Strawberry Fields.
-    Args:
-        weights (tf.Tensor): Trainable parameters.
-        inputs (tf.Tensor): Input data. Assumes inputs are correctly shaped for TF.
-                            Expected shape for inputs: [num_qumodes, num_features_per_qumode]
-                            This function is designed for ONE instance from a batch.
-                            Batching (e.g. tf.map_fn over inputs) should be handled by the caller.
-    Returns:
-        sf.Program: The Strawberry Fields program.
-    """
-    if all_wires is None or auto_wires is None or index is None or num_layers is None or two_comb_wires is None:
-        raise ValueError("Global parameters (all_wires, auto_wires, etc.) not initialized. Call initialize() first.")
+def sf_circuit_template(wires, layers) -> sf.Program:
+    """Defines the CV quantum circuit with symbolic parameters."""
+    prog = sf.Program(wires)
 
-    prog = sf.Program(len(all_wires))
-
-    if not isinstance(weights, tf.Tensor):
-        weights = tf.convert_to_tensor(weights, dtype=tf.float32)
-    if not isinstance(inputs, tf.Tensor):
-        inputs = tf.convert_to_tensor(inputs, dtype=tf.float32)
-
-    if tf.rank(inputs) != 2: # (num_qumodes, features)
-        raise ValueError(f"sf_circuit_template expects single instance inputs with rank 2 ([num_qumodes, num_features]). Got rank {tf.rank(inputs)}. Batch with tf.map_fn.")
+    # Create symbolic parameters for all weights and inputs
+    s_scale = prog.params('s_scale')
+    disp_mag_params = [[prog.params(f'disp_mag_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
+    disp_phase_params = [[prog.params(f'disp_phase_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
+    squeeze_mag_params = [[prog.params(f'squeeze_mag_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
+    squeeze_phase_params = [[prog.params(f'squeeze_phase_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
     
-    inputs_single = inputs # Explicitly state we are working with a single instance
-
-    scale_factor = 10.0 * sigmoid(weights[-3]) + 0.01
+    eta_params = [prog.params(f'eta_{w}') for w in range(wires)]
+    phi_params = [prog.params(f'phi_{w}') for w in range(wires)]
+    pt_params = [prog.params(f'pt_{w}') for w in range(wires)]
 
     with prog.context as q:
-        for w_idx in auto_wires:
-            current_input_features = inputs_single[w_idx]
+        # Use sf.math for operations on symbolic parameters
+        scale_factor = 10.0 / (1.0 + sf.math.exp(-s_scale)) + 0.01
 
-            eta = tf.cast(current_input_features[index['eta']], dtype=tf.float32)
-            phi = tf.cast(current_input_features[index['phi']], dtype=tf.float32)
-            pt = tf.cast(current_input_features[index['pt']], dtype=tf.float32)
+        # Encoding layer
+        for w_idx in range(wires):
+            Sgate(eta_params[w_idx], pt_params[w_idx] * phi_params[w_idx] / 2.0) | q[w_idx]
+            Dgate(scale_factor * pt_params[w_idx], eta_params[w_idx]) | q[w_idx]
 
-            Dgate(scale_factor * pt, eta) | q[w_idx]
-            Sgate(eta, pt * phi / 2.0) | q[w_idx]
-
-        N_auto = len(auto_wires)
-        for L_idx in range(num_layers):
+        # Trainable layers
+        all_wires_list = list(range(wires))
+        two_comb_wires = list(combinations(all_wires_list, 2))
+        
+        for L_idx in range(layers):
             for pair in two_comb_wires:
                 CXgate(1.0) | (q[pair[0]], q[pair[1]])
             
-            for i in range(N_auto):
-                idx1 = auto_wires[i] 
-                idx2 = auto_wires[(i + 1) % N_auto] 
+            for i in range(wires):
+                idx1 = all_wires_list[i]
+                idx2 = all_wires_list[(i + 1) % wires]
                 BSgate(np.pi / 4.0, np.pi / 2.0) | (q[idx1], q[idx2])
             
-            layer_params_flat_idx_start = L_idx * N_auto * 4
-            
-            disp_mag_params_layer = weights[layer_params_flat_idx_start : layer_params_flat_idx_start + N_auto]
-            disp_phase_params_layer = weights[layer_params_flat_idx_start + N_auto : layer_params_flat_idx_start + 2 * N_auto]
-            squeeze_mag_params_layer = weights[layer_params_flat_idx_start + 2 * N_auto : layer_params_flat_idx_start + 3 * N_auto]
-            squeeze_phase_params_layer = weights[layer_params_flat_idx_start + 3 * N_auto : layer_params_flat_idx_start + 4 * N_auto]
-
-            for i, w_idx_loop in enumerate(auto_wires):
-                Dgate(disp_mag_params_layer[i], disp_phase_params_layer[i]) | q[w_idx_loop]
-                Sgate(squeeze_mag_params_layer[i], squeeze_phase_params_layer[i]) | q[w_idx_loop]
+            for w_idx in range(wires):
+                Sgate(squeeze_mag_params[L_idx][w_idx], squeeze_phase_params[L_idx][w_idx]) | q[w_idx]
+                Dgate(disp_mag_params[L_idx][w_idx], disp_phase_params[L_idx][w_idx]) | q[w_idx]
             
     return prog
 
-class SimpleSFModel:
-    def __init__(self, wires=4, layers=1, cutoff_dim=10, backend_name='tf', output_wires=3, rand_init=True):
+@tf.autograph.experimental.do_not_convert
+class SimpleSFModel(tf.keras.Model):
+    def __init__(self, wires=4, layers=1, cutoff_dim=10, output_wires=3, rand_init=True):
+        super(SimpleSFModel, self).__init__()
         self.wires = wires
-        self.layers = layers
+        self.num_layers = layers 
         self.output_wires = output_wires
-        self.sf_engine = sf.Engine(backend=backend_name, backend_options={"cutoff_dim": cutoff_dim})
-        self.sf_circuit_template_fn = sf_circuit_template
+
+        # Create the symbolic circuit and the engine
+        self.prog = sf_circuit_template(wires, layers)
+        self.sf_engine = sf.Engine(backend="tf", backend_options={"cutoff_dim": cutoff_dim})
+
+        # Define structured, trainable weights as tf.Variables
+        w_init = tf.random_uniform_initializer(-1, 1) if rand_init else tf.ones_initializer()
+        self.s_scale = tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name='s_scale')
+        self.disp_mag_params = [[tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name=f'disp_mag_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
+        self.disp_phase_params = [[tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name=f'disp_phase_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
+        self.squeeze_mag_params = [[tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name=f'squeeze_mag_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
+        self.squeeze_phase_params = [[tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name=f'squeeze_phase_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
+
+        # Classical post-processing layer to get a single score
+        self.classical_layer = tf.keras.layers.Dense(1, activation=None)
+
+    @tf.function
+    def call(self, inputs):
+        # This is the forward pass of the model.
+        # 'inputs' has shape (batch_size, wires, features)
         
-        # Initialize weights as a trainable variable
-        num_weights = (layers * wires * 4) + 3
-        self.current_weights = tf.Variable(tf.random.uniform([num_weights], -1, 1, dtype=tf.float32)) if rand_init else tf.Variable(tf.ones([num_weights], dtype=tf.float32))
-        
-        initialize(wires=self.wires, layers=self.layers)
+        # 1. Construct the args dictionary to bind numerical values to symbolic parameters
+        sf_args = {'s_scale': self.s_scale}
+        for L in range(self.num_layers):
+            for w in range(self.wires):
+                sf_args[f'disp_mag_L{L}_w{w}'] = self.disp_mag_params[L][w]
+                sf_args[f'disp_phase_L{L}_w{w}'] = self.disp_phase_params[L][w]
+                sf_args[f'squeeze_mag_L{L}_w{w}'] = self.squeeze_mag_params[L][w]
+                sf_args[f'squeeze_phase_L{L}_w{w}'] = self.squeeze_phase_params[L][w]
 
-    def run_circuit_once(self, single_input_instance: tf.Tensor) -> tf.Tensor:
-        if self.current_weights is None:
-            raise ValueError("Weights not initialized. Load or set weights first.")
-        if not isinstance(single_input_instance, tf.Tensor):
-            single_input_instance = tf.convert_to_tensor(single_input_instance, dtype=tf.float32)
+        # Map input features from the batch to the symbolic parameters
+        # Feature order is ['eta', 'phi', 'pt']
+        eta_all_wires = inputs[:, :, 0]
+        phi_all_wires = inputs[:, :, 1]
+        pt_all_wires = inputs[:, :, 2]
+        for w in range(self.wires):
+            sf_args[f'eta_{w}'] = eta_all_wires[:, w]
+            sf_args[f'phi_{w}'] = phi_all_wires[:, w]
+            sf_args[f'pt_{w}'] = pt_all_wires[:, w]
 
-        prog = self.sf_circuit_template_fn(self.current_weights, single_input_instance)
-        results = self.sf_engine.run(prog)
-        state = results.state                                
+        # We only reset the engine if it has been run before
+        if self.sf_engine.run_progs:
+            self.sf_engine.reset()
+        results = self.sf_engine.run(self.prog, args=sf_args)
+        state = results.state
 
-        nbar = [tf.reduce_mean(state.mean_photon(m)) for m in range(self.output_wires)]
-        return tf.stack(nbar)
+        # 3. Extract the mean photon number for each output wire
+        # The result for each is a batched tensor
+        nbar_list = [state.mean_photon(w) for w in range(self.output_wires)]
+        output_photons = tf.stack(nbar_list, axis=1)
+        print(output_photons)
+
+        # 4. Post-process the quantum output to a single classical score
+        final_score = self.classical_layer(output_photons)
+        return tf.squeeze(final_score, axis=1)
+
 
 def plot_roc_curve(labels, scores, save_path):
     """Calculates and plots the ROC curve, saving it to a file."""
@@ -233,7 +234,7 @@ if __name__ == '__main__':
     MAX_JETS_TO_LOAD_TEST = 20 # Out of 20000 jets
     EPOCHS = 10
     LEARNING_RATE = 0.01
-    BATCH_SIZE = 10
+    BATCH_SIZE = 1 # to start
     rand_init = False # Initalises weights with random values. Only set to False for testing purposes, otherwise True
     loss_type = 'MSE' # 'MSE' or 'BCE' for Binary Cross-Entropy
     save_dir = './saved_models_sf'
@@ -266,6 +267,24 @@ if __name__ == '__main__':
     val_dataset = tf.data.Dataset.from_tensor_slices((val_jets, val_labels)).batch(BATCH_SIZE)
     test_dataset = tf.data.Dataset.from_tensor_slices((test_jets, test_labels)).batch(BATCH_SIZE)
 
+    # --- Sanity Check: Prove Gradients are Flowing ---
+    print("\n--- Running Sanity Check ---")
+    sanity_batch_jets, sanity_batch_labels = next(iter(train_dataset))
+    with tf.GradientTape() as tape:
+        print(f"Initial scale weight: {model.s_scale.numpy():.4f}")
+        # Call the model once to build the layers (including the classical one)
+        sanity_scores = model(sanity_batch_jets)
+        # Now that the layer is built, we can access its weights
+        print(f"Initial first dense weight: {model.classical_layer.weights[0][0].numpy()[0]:.4f}")
+        sanity_loss = loss_function(sanity_batch_labels, sanity_scores)
+        print(f"Sanity check loss: {sanity_loss.numpy():.4f}")
+    
+    sanity_gradients = tape.gradient(sanity_loss, model.trainable_variables)
+    optimizer.apply_gradients(zip(sanity_gradients, model.trainable_variables))
+    print("Gradients applied.")
+    print(f"Weight after 1 step: {model.s_scale.numpy():.4f}")
+    print(f"Dense weight after 1 step: {model.classical_layer.weights[0][0].numpy()[0]:.4f}")
+
     print("\n--- Starting Training ---")
     for epoch in range(EPOCHS):
         # --- Training Step ---
@@ -273,13 +292,13 @@ if __name__ == '__main__':
         num_train_batches = 0
         for batch_jets, batch_labels in tqdm(train_dataset, desc=f"Epoch {epoch+1}/{EPOCHS} [Train]"):
             with tf.GradientTape() as tape:
-                batch_outputs = tf.map_fn(lambda x: model.run_circuit_once(x), batch_jets, dtype=tf.float32)
-                # Loss is calculated directly on the 3-dim output vs the scalar label (handled by broadcasting)
-                loss = loss_function(batch_labels, batch_outputs, type=loss_type)
+                # The model is called directly on the batch of jets
+                batch_scores = model(batch_jets)
+                loss = loss_function(batch_labels, batch_scores)
 
-            # Calculate and apply gradients
-            gradients = tape.gradient(loss, [model.current_weights])
-            optimizer.apply_gradients(zip(gradients, [model.current_weights]))
+            # Gradients are calculated on the model's trainable variables
+            gradients = tape.gradient(loss, model.trainable_variables)
+            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             
             total_train_loss += loss
             num_train_batches += 1
@@ -290,60 +309,55 @@ if __name__ == '__main__':
         total_val_loss = 0
         num_val_batches = 0
         for batch_jets_val, batch_labels_val in tqdm(val_dataset, desc=f"Epoch {epoch+1}/{EPOCHS} [Val]"):
-            batch_outputs_val = tf.map_fn(lambda x: model.run_circuit_once(x), batch_jets_val, dtype=tf.float32)
-            val_loss = loss_function(batch_labels_val, batch_outputs_val)
+            val_scores = model(batch_jets_val)
+            val_loss = loss_function(batch_labels_val, val_scores)
             total_val_loss += val_loss
             num_val_batches += 1
             
         avg_val_loss = total_val_loss / num_val_batches
         
         print(f"Epoch {epoch + 1}/{EPOCHS} - Training Loss: {avg_train_loss:.4f} - Validation Loss: {avg_val_loss:.4f}")
-        print(f"  -> First 5 weights: {model.current_weights.numpy()[:5]}")
+        # Optional: print a few weights to see if they change
+        print(f"  -> Scale weight: {model.s_scale.numpy():.4f}, First dense weight: {model.classical_layer.weights[0][0].numpy()[0]:.4f}")
 
     print("\n--- Finished Training ---")
 
     # --- Testing Step ---
     print("--- Evaluating on Test Set ---")
-    total_test_loss = 0
-    num_test_batches = 0
     all_test_labels = []
     all_test_scores = []
     for batch_jets_test, batch_labels_test in tqdm(test_dataset, desc="Testing"):
-        batch_outputs_test = tf.map_fn(lambda x: model.run_circuit_once(x), batch_jets_test, dtype=tf.float32)
-        test_loss = loss_function(batch_labels_test, batch_outputs_test)
-        
-        # For evaluation (AUC/ROC), we convert the output to a single score
-        scores_test = tf.reduce_sum(batch_outputs_test, axis=1)
-
-        total_test_loss += test_loss
-        num_test_batches += 1
+        test_scores = model(batch_jets_test)
         all_test_labels.append(batch_labels_test.numpy())
-        all_test_scores.append(scores_test.numpy())
+        all_test_scores.append(test_scores.numpy())
         
-    avg_test_loss = total_test_loss / num_test_batches
-    print(f"Final Test Loss: {avg_test_loss:.4f}")
-
     # --- Post-Training Evaluation ---
     all_test_labels = np.concatenate(all_test_labels)
     all_test_scores = np.concatenate(all_test_scores)
 
-    auc_score = roc_auc_score(all_test_labels, all_test_scores)
+    # Use sigmoid on scores for AUC calculation as BCE loss was with logits
+    final_scores_for_auc = tf.nn.sigmoid(all_test_scores).numpy()
+
+    auc_score = roc_auc_score(all_test_labels, final_scores_for_auc)
     print(f"Test AUC Score: {auc_score:.4f}")
 
     # Generate and save plots
+    plots_dir = os.path.join(save_dir, run_name, 'plots')
     roc_plot_path = os.path.join(plots_dir, 'roc_curve.png')
     score_hist_path = os.path.join(plots_dir, 'score_histogram.png')
-    plot_roc_curve(all_test_labels, all_test_scores, roc_plot_path)
-    plot_score_histogram(all_test_labels, all_test_scores, score_hist_path)
+    plot_roc_curve(all_test_labels, final_scores_for_auc, roc_plot_path)
+    plot_score_histogram(all_test_labels, final_scores_for_auc, score_hist_path)
     print(f"Plots saved to {plots_dir}")
 
     # --- Run a single instance post-training to see the result ---
     print("--- Running a single instance post-training ---")
-    first_instance_input = test_jets[0]
+    first_instance_input = test_jets[0:1] # Keep batch dimension
     first_instance_label = test_labels[0]
-    output_photons = model.run_circuit_once(first_instance_input)
-    final_score = tf.reduce_sum(output_photons)
+    
+    final_score = model(first_instance_input)
+    final_prob = tf.nn.sigmoid(final_score)
+
     print(f"Input shape: {first_instance_input.shape}")
     print(f"True Label: {first_instance_label.numpy()}")
-    print(f"Output (mean photons): {output_photons.numpy()}")
-    print(f"Final Score: {final_score.numpy():.4f}")
+    print(f"Final Score (Logit): {final_score.numpy()[0]:.4f}")
+    print(f"Final Probability: {final_prob.numpy()[0]:.4f}")
