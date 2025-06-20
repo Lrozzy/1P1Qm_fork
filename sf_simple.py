@@ -60,10 +60,20 @@ def load_data_from_h5(file_path, max_jets=None, num_particles=4):
     labels = tf.convert_to_tensor(labels, dtype=tf.float32)
     return jet_constituents, labels
 
-def loss_function(y_true, y_pred):
-    """Calculates the Binary Cross-Entropy loss from logits."""
-    bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
-    return bce(y_true, y_pred)
+def loss_function(y_true, y_pred, loss_type='BCE'):
+    """Calculates the loss based on the specified loss_type."""
+    if loss_type == 'BCE':
+        bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+        return bce(y_true, y_pred)
+    elif loss_type == 'MSE':
+        mse = tf.keras.losses.MeanSquaredError()
+        # For MSE with binary labels, we compare against probabilities.
+        # The model outputs logits, so we apply sigmoid.
+        y_pred_probs = tf.nn.sigmoid(y_pred)
+        return mse(y_true, y_pred_probs)
+    else:
+        raise ValueError(f"Unsupported loss type: {loss_type}. Must be 'BCE' or 'MSE'.")
+
 
 def sf_circuit_template(wires, layers) -> sf.Program:
     """Defines the CV quantum circuit with symbolic parameters."""
@@ -108,70 +118,6 @@ def sf_circuit_template(wires, layers) -> sf.Program:
             
     return prog
 
-@tf.autograph.experimental.do_not_convert
-class SimpleSFModel(tf.keras.Model):
-    def __init__(self, wires=4, layers=1, cutoff_dim=10, output_wires=3, rand_init=True):
-        super(SimpleSFModel, self).__init__()
-        self.wires = wires
-        self.num_layers = layers 
-        self.output_wires = output_wires
-
-        # Create the symbolic circuit and the engine
-        self.prog = sf_circuit_template(wires, layers)
-        self.sf_engine = sf.Engine(backend="tf", backend_options={"cutoff_dim": cutoff_dim})
-
-        # Define structured, trainable weights as tf.Variables
-        w_init = tf.random_uniform_initializer(-1, 1) if rand_init else tf.ones_initializer()
-        self.s_scale = tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name='s_scale')
-        self.disp_mag_params = [[tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name=f'disp_mag_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
-        self.disp_phase_params = [[tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name=f'disp_phase_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
-        self.squeeze_mag_params = [[tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name=f'squeeze_mag_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
-        self.squeeze_phase_params = [[tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name=f'squeeze_phase_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
-
-        # Classical post-processing layer to get a single score
-        self.classical_layer = tf.keras.layers.Dense(1, activation=None)
-
-    @tf.function
-    def call(self, inputs):
-        # This is the forward pass of the model.
-        # 'inputs' has shape (batch_size, wires, features)
-        
-        # 1. Construct the args dictionary to bind numerical values to symbolic parameters
-        sf_args = {'s_scale': self.s_scale}
-        for L in range(self.num_layers):
-            for w in range(self.wires):
-                sf_args[f'disp_mag_L{L}_w{w}'] = self.disp_mag_params[L][w]
-                sf_args[f'disp_phase_L{L}_w{w}'] = self.disp_phase_params[L][w]
-                sf_args[f'squeeze_mag_L{L}_w{w}'] = self.squeeze_mag_params[L][w]
-                sf_args[f'squeeze_phase_L{L}_w{w}'] = self.squeeze_phase_params[L][w]
-
-        # Map input features from the batch to the symbolic parameters
-        # Feature order is ['eta', 'phi', 'pt']
-        eta_all_wires = inputs[:, :, 0]
-        phi_all_wires = inputs[:, :, 1]
-        pt_all_wires = inputs[:, :, 2]
-        for w in range(self.wires):
-            sf_args[f'eta_{w}'] = eta_all_wires[:, w]
-            sf_args[f'phi_{w}'] = phi_all_wires[:, w]
-            sf_args[f'pt_{w}'] = pt_all_wires[:, w]
-
-        # We only reset the engine if it has been run before
-        if self.sf_engine.run_progs:
-            self.sf_engine.reset()
-        results = self.sf_engine.run(self.prog, args=sf_args)
-        state = results.state
-
-        # 3. Extract the mean photon number for each output wire
-        # The result for each is a batched tensor
-        nbar_list = [state.mean_photon(w) for w in range(self.output_wires)]
-        output_photons = tf.stack(nbar_list, axis=1)
-        print(output_photons)
-
-        # 4. Post-process the quantum output to a single classical score
-        final_score = self.classical_layer(output_photons)
-        return tf.squeeze(final_score, axis=1)
-
-
 def plot_roc_curve(labels, scores, save_path):
     """Calculates and plots the ROC curve, saving it to a file."""
     fpr, tpr, _ = roc_curve(labels, scores)
@@ -202,6 +148,58 @@ def plot_score_histogram(labels, scores, save_path):
     plt.legend(loc='upper left')
     plt.savefig(save_path)
     plt.close()
+    
+class SimpleSFModel(tf.keras.Model):
+    def __init__(self, wires=4, layers=1, cutoff_dim=10, output_wires=3, rand_init=True):
+        super(SimpleSFModel, self).__init__(dynamic=True)  
+        self.wires = wires
+        self.num_layers = layers 
+        self.cutoff = cutoff_dim
+        self.output_wires = output_wires
+
+        # Create the symbolic circuit
+        self.prog = sf_circuit_template(wires, layers)
+
+        # Define structured, trainable weights as tf.Variables
+        w_init = tf.random_uniform_initializer(-1, 1) if rand_init else tf.ones_initializer()
+        self.s_scale = tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name='s_scale')
+        self.disp_mag_params = [[tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name=f'disp_mag_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
+        self.disp_phase_params = [[tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name=f'disp_phase_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
+        self.squeeze_mag_params = [[tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name=f'squeeze_mag_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
+        self.squeeze_phase_params = [[tf.Variable(initial_value=w_init(shape=[], dtype=tf.float32), name=f'squeeze_phase_L{L}_w{w}') for w in range(wires)] for L in range(layers)]
+
+        # Classical post-processing layer to get a single score
+        self.classical_layer = tf.keras.layers.Dense(1, activation=None)
+
+    def _run_single(self, jet):
+        # jet shape (wires, 3) : [eta, phi, pt] per wire
+        sf_args = {'s_scale': self.s_scale}
+        # bind all trainable gate params
+        for L in range(self.num_layers):
+            for w in range(self.wires):
+                sf_args[f'disp_mag_L{L}_w{w}']    = self.disp_mag_params[L][w]
+                sf_args[f'disp_phase_L{L}_w{w}']  = self.disp_phase_params[L][w]
+                sf_args[f'squeeze_mag_L{L}_w{w}'] = self.squeeze_mag_params[L][w]
+                sf_args[f'squeeze_phase_L{L}_w{w}'] = self.squeeze_phase_params[L][w]
+
+        # bind the jet’s features
+        eta, phi, pt = jet[:, 0], jet[:, 1], jet[:, 2]
+        for w in range(self.wires):
+            sf_args[f'eta_{w}'] = eta[w]
+            sf_args[f'phi_{w}'] = phi[w]
+            sf_args[f'pt_{w}']  = pt[w]
+
+        # run a fresh engine 
+        eng   = sf.Engine("tf", backend_options={"cutoff_dim": self.cutoff})
+        state = eng.run(self.prog, args=sf_args).state
+        photons = tf.stack([state.mean_photon(m) for m in range(self.output_wires)])
+        return self.classical_layer(tf.expand_dims(photons, 0))[0, 0]  # scalar
+
+    def call(self, inputs):
+        logits = [self._run_single(inputs[i]) for i in range(tf.shape(inputs)[0])]
+        return tf.stack(logits, axis=0)  # (batch,)
+
+
 
 if __name__ == '__main__':
     # --- Configuration ---
@@ -228,14 +226,15 @@ if __name__ == '__main__':
 
     NUM_WIRES = 4
     NUM_LAYERS = 1
-    CUTOFF_DIM = 5
-    MAX_JETS_TO_LOAD_TRAIN = 100 # Out of 40000 jets
-    MAX_JETS_TO_LOAD_VAL = 20 # Out of 10000 jets
-    MAX_JETS_TO_LOAD_TEST = 20 # Out of 20000 jets
+    CUTOFF_DIM = 10 # Cutoff dimension for the CV quantum circuit
+    MAX_JETS_TO_LOAD_TRAIN = 2000 # Out of 40000 jets
+    MAX_JETS_TO_LOAD_VAL = 400 # Out of 10000 jets
+    MAX_JETS_TO_LOAD_TEST = 400 # Out of 20000 jets
     EPOCHS = 10
     LEARNING_RATE = 0.01
     BATCH_SIZE = 1 # to start
-    rand_init = False # Initalises weights with random values. Only set to False for testing purposes, otherwise True
+    sanity_check = False # If True, runs a sanity check to prove gradients are flowing
+    rand_init = True # Initalises weights with random values. Only set to False for testing purposes, otherwise True
     loss_type = 'MSE' # 'MSE' or 'BCE' for Binary Cross-Entropy
     save_dir = './saved_models_sf'
     data_dir = '/home/hep/lr1424/1P1Qm_fork/'
@@ -267,23 +266,31 @@ if __name__ == '__main__':
     val_dataset = tf.data.Dataset.from_tensor_slices((val_jets, val_labels)).batch(BATCH_SIZE)
     test_dataset = tf.data.Dataset.from_tensor_slices((test_jets, test_labels)).batch(BATCH_SIZE)
 
+    # Print all configuration parameters
+    print(f"Run Name: {run_name}")
+    print(f"Number of wires: {NUM_WIRES}, Number of layers: {NUM_LAYERS}, Cutoff dimension: {CUTOFF_DIM}")
+    print(f"Max jets to load (train): {MAX_JETS_TO_LOAD_TRAIN}, (val): {MAX_JETS_TO_LOAD_VAL}, (test): {MAX_JETS_TO_LOAD_TEST}")
+    print(f"Epochs: {EPOCHS}, Learning Rate: {LEARNING_RATE}, Batch Size: {BATCH_SIZE}")
+    print(f"Loss Type: {loss_type}")
+
     # --- Sanity Check: Prove Gradients are Flowing ---
-    print("\n--- Running Sanity Check ---")
-    sanity_batch_jets, sanity_batch_labels = next(iter(train_dataset))
-    with tf.GradientTape() as tape:
-        print(f"Initial scale weight: {model.s_scale.numpy():.4f}")
-        # Call the model once to build the layers (including the classical one)
-        sanity_scores = model(sanity_batch_jets)
-        # Now that the layer is built, we can access its weights
-        print(f"Initial first dense weight: {model.classical_layer.weights[0][0].numpy()[0]:.4f}")
-        sanity_loss = loss_function(sanity_batch_labels, sanity_scores)
-        print(f"Sanity check loss: {sanity_loss.numpy():.4f}")
-    
-    sanity_gradients = tape.gradient(sanity_loss, model.trainable_variables)
-    optimizer.apply_gradients(zip(sanity_gradients, model.trainable_variables))
-    print("Gradients applied.")
-    print(f"Weight after 1 step: {model.s_scale.numpy():.4f}")
-    print(f"Dense weight after 1 step: {model.classical_layer.weights[0][0].numpy()[0]:.4f}")
+    if sanity_check:
+        print("\n--- Running Sanity Check ---")
+        sanity_batch_jets, sanity_batch_labels = next(iter(train_dataset))
+        with tf.GradientTape() as tape:
+            print(f"Initial scale weight: {model.s_scale.numpy():.4f}")
+            # Call the model once to build the layers (including the classical one)
+            sanity_scores = model(sanity_batch_jets)
+            # Now that the layer is built, we can access its weights
+            print(f"Initial first dense weight: {model.classical_layer.weights[0][0].numpy()[0]:.4f}")
+            sanity_loss = loss_function(sanity_batch_labels, sanity_scores, loss_type=loss_type)
+            print(f"Sanity check loss: {sanity_loss.numpy():.4f}")
+        
+        sanity_gradients = tape.gradient(sanity_loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(sanity_gradients, model.trainable_variables))
+        print("Gradients applied.")
+        print(f"Weight after 1 step: {model.s_scale.numpy():.4f}")
+        print(f"Dense weight after 1 step: {model.classical_layer.weights[0][0].numpy()[0]:.4f}")
 
     print("\n--- Starting Training ---")
     for epoch in range(EPOCHS):
@@ -294,7 +301,7 @@ if __name__ == '__main__':
             with tf.GradientTape() as tape:
                 # The model is called directly on the batch of jets
                 batch_scores = model(batch_jets)
-                loss = loss_function(batch_labels, batch_scores)
+                loss = loss_function(batch_labels, batch_scores, loss_type=loss_type)
 
             # Gradients are calculated on the model's trainable variables
             gradients = tape.gradient(loss, model.trainable_variables)
@@ -310,15 +317,15 @@ if __name__ == '__main__':
         num_val_batches = 0
         for batch_jets_val, batch_labels_val in tqdm(val_dataset, desc=f"Epoch {epoch+1}/{EPOCHS} [Val]"):
             val_scores = model(batch_jets_val)
-            val_loss = loss_function(batch_labels_val, val_scores)
+            val_loss = loss_function(batch_labels_val, val_scores, loss_type=loss_type)
             total_val_loss += val_loss
             num_val_batches += 1
             
         avg_val_loss = total_val_loss / num_val_batches
         
         print(f"Epoch {epoch + 1}/{EPOCHS} - Training Loss: {avg_train_loss:.4f} - Validation Loss: {avg_val_loss:.4f}")
-        # Optional: print a few weights to see if they change
-        print(f"  -> Scale weight: {model.s_scale.numpy():.4f}, First dense weight: {model.classical_layer.weights[0][0].numpy()[0]:.4f}")
+        # Print a few weights to see if they change
+        # print(f"  -> Scale weight: {model.s_scale.numpy():.4f}, First dense weight: {model.classical_layer.weights[0][0].numpy()[0]:.4f}")
 
     print("\n--- Finished Training ---")
 
@@ -349,15 +356,4 @@ if __name__ == '__main__':
     plot_score_histogram(all_test_labels, final_scores_for_auc, score_hist_path)
     print(f"Plots saved to {plots_dir}")
 
-    # --- Run a single instance post-training to see the result ---
-    print("--- Running a single instance post-training ---")
-    first_instance_input = test_jets[0:1] # Keep batch dimension
-    first_instance_label = test_labels[0]
-    
-    final_score = model(first_instance_input)
-    final_prob = tf.nn.sigmoid(final_score)
 
-    print(f"Input shape: {first_instance_input.shape}")
-    print(f"True Label: {first_instance_label.numpy()}")
-    print(f"Final Score (Logit): {final_score.numpy()[0]:.4f}")
-    print(f"Final Probability: {final_prob.numpy()[0]:.4f}")
