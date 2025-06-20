@@ -159,6 +159,7 @@ class SimpleSFModel(tf.keras.Model):
 
         # Create the symbolic circuit
         self.prog = sf_circuit_template(wires, layers)
+        self.engine = sf.Engine("tf", backend_options={"cutoff_dim": cutoff_dim})
 
         # Define structured, trainable weights as tf.Variables
         w_init = tf.random_uniform_initializer(-1, 1) if rand_init else tf.ones_initializer()
@@ -189,9 +190,9 @@ class SimpleSFModel(tf.keras.Model):
             sf_args[f'phi_{w}'] = phi[w]
             sf_args[f'pt_{w}']  = pt[w]
 
-        # run a fresh engine 
-        eng   = sf.Engine("tf", backend_options={"cutoff_dim": self.cutoff})
-        state = eng.run(self.prog, args=sf_args).state
+        if self.engine.run_progs:          # True after the first run
+            self.engine.reset()            # clears state & frees scratch tensors
+        state = self.engine.run(self.prog, args=sf_args).state
         photons = tf.stack([state.mean_photon(m) for m in range(self.output_wires)])
         return self.classical_layer(tf.expand_dims(photons, 0))[0, 0]  # scalar
 
@@ -208,6 +209,21 @@ if __name__ == '__main__':
     parser.add_argument('-name', type=str, help='Name for this run (used for saving models/plots)')
     args = parser.parse_args()
 
+    NUM_WIRES = 4
+    NUM_LAYERS = 1
+    CUTOFF_DIM = 10 # Cutoff dimension for the CV quantum circuit
+    MAX_JETS_TO_LOAD_TRAIN = 100 # Out of 40000 jets
+    MAX_JETS_TO_LOAD_VAL = 20 # Out of 10000 jets
+    MAX_JETS_TO_LOAD_TEST = 20 # Out of 20000 jets
+    EPOCHS = 10
+    LEARNING_RATE = 0.01
+    BATCH_SIZE = 1 # to start
+    sanity_check = False # If True, runs a sanity check to prove gradients are flowing
+    rand_init = True # Initalises weights with random values. Only set to False for testing purposes, otherwise True
+    loss_type = 'BCE' # 'MSE' or 'BCE' for Binary Cross-Entropy
+    save_dir = './saved_models_sf'
+    data_dir = '/home/hep/lr1424/1P1Qm_fork/'
+    
     if args.name:
         # If the provided run_name already exists, append _i to make it unique
         base_run_name = args.name
@@ -217,27 +233,13 @@ if __name__ == '__main__':
             run_name = f"{base_run_name}_{i}"
             i += 1
     else:
-        # Auto-generate a run name like base_1, base_2, etc.
-        base_name = "base"
+        # Auto-generate a run name like 100_jets_BCE, 20_jets_MSE, etc.
+        base_name = f"{MAX_JETS_TO_LOAD_TRAIN}_jets_{loss_type}"
+        run_name = base_name
         i = 1
-        while os.path.exists(f'./saved_models_sf/{base_name}_{i}'):
+        while os.path.exists(f'./saved_models_sf/{run_name}'):
+            run_name = f"{base_name}_{i}"
             i += 1
-        run_name = f"{base_name}_{i}"
-
-    NUM_WIRES = 4
-    NUM_LAYERS = 1
-    CUTOFF_DIM = 10 # Cutoff dimension for the CV quantum circuit
-    MAX_JETS_TO_LOAD_TRAIN = 2000 # Out of 40000 jets
-    MAX_JETS_TO_LOAD_VAL = 400 # Out of 10000 jets
-    MAX_JETS_TO_LOAD_TEST = 400 # Out of 20000 jets
-    EPOCHS = 10
-    LEARNING_RATE = 0.01
-    BATCH_SIZE = 1 # to start
-    sanity_check = False # If True, runs a sanity check to prove gradients are flowing
-    rand_init = True # Initalises weights with random values. Only set to False for testing purposes, otherwise True
-    loss_type = 'MSE' # 'MSE' or 'BCE' for Binary Cross-Entropy
-    save_dir = './saved_models_sf'
-    data_dir = '/home/hep/lr1424/1P1Qm_fork/'
     
     # --- Initialization ---
     model = SimpleSFModel(wires=NUM_WIRES, layers=NUM_LAYERS, cutoff_dim=CUTOFF_DIM, output_wires=3, rand_init=rand_init)
