@@ -4,12 +4,13 @@ import tensorflow as tf, numpy as np, h5py, os, random
 from sklearn.metrics import roc_auc_score
 
 # ----------  hyper-params ----------
-CUT_OFF     = 7                 # fock cutoff dim
+CUT_OFF     = 10                 # fock cutoff dim
 WIRES       = 4
 LAYERS      = 1
 STEPS       = 50
 LR          = 0.01
-MAX_JETS    = 200               # keep it tiny for the demo
+LOSS_FN     = "mse"               # loss function: "bce" or "mse"
+MAX_JETS    = 200                # keep it tiny for the demo
 DATA_DIR    = "/home/hep/lr1424/1P1Qm_fork/flat_train/TTBar+ZJets_flat.h5"
 VAL_DIR     = "/home/hep/lr1424/1P1Qm_fork/flat_val/TTBar+ZJets_flat.h5"
 TEST_DIR    = "/home/hep/lr1424/1P1Qm_fork/flat_test/TTBar+ZJets_flat.h5"
@@ -44,6 +45,12 @@ with prog.context as q:
         Dgate(scale*pt[w], eta[w])    | q[w]
     for a,b in [(0,1),(0,2),(0,3),(1,2),(1,3),(2,3)]:
         CXgate(1.0) | (q[a], q[b])
+
+    all_wires_list = list(range(WIRES))
+    for i in range(WIRES):
+                idx1 = all_wires_list[i]
+                idx2 = all_wires_list[(i + 1) % WIRES]
+                BSgate(np.pi / 4.0, np.pi / 2.0) | (q[idx1], q[idx2])
     for w in range(WIRES):
         Sgate(SM[w], SP[w]) | q[w]
         Dgate(DM[w], DP[w]) | q[w]
@@ -83,44 +90,88 @@ def make_args(jet):
         d[f"pt{w}"]  = scale_feature(jet[w, 2], "pt")
     return d
 
+def get_loss_fn(loss_type='bce'):
+    """
+    Returns a function loss_fn(y_true, logit) so the training loop
+    doesn't need to care whether we are using BCE (logits) or
+    MSE (probabilities).
+    """
+    if loss_type.lower() == "bce":
+        bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+
+        # BCE expects logits directly
+        def _loss(y_true, logit):
+            return bce(y_true, logit)
+
+        # probability to feed to AUC afterwards
+        _prob = lambda logit: tf.sigmoid(logit)
+
+    elif loss_type.lower() == "mse":
+        mse = tf.keras.losses.MeanSquaredError()
+
+        # MSE should see probabilities in [0,1]
+        def _loss(y_true, logit):
+            return mse(y_true, tf.sigmoid(logit))
+
+        _prob = lambda logit: tf.sigmoid(logit)
+
+    else:
+        raise ValueError(f"Unknown loss type: {loss_type} (use 'bce' or 'mse')")
+
+    return _loss, _prob
+
+
+loss_fn, logit_to_prob = get_loss_fn(LOSS_FN)
 opt = tf.keras.optimizers.Adam(LR)
-bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+
 eng = sf.Engine("tf", backend_options={"cutoff_dim": CUT_OFF})
 
 # -------- training loop ----------
 for step in range(STEPS):
-    i = random.randrange(MAX_JETS)
-    jet, label = jets[i], labels[i]
+    idx   = random.randrange(MAX_JETS)
+    jet   = jets[idx]
+    label = labels[idx]
+
     if eng.run_progs:
         eng.reset()
+
     with tf.GradientTape() as tape:
-        state = eng.run(prog, args=make_args(jet)).state
+        state   = eng.run(prog, args=make_args(jet)).state
         photons = tf.stack([state.mean_photon(m) for m in range(3)])
-        logit   = tf.reduce_sum(photons)
-        # print("⟨n⟩ =", tf.reduce_sum(photons).numpy())
-        loss    = bce(tf.expand_dims(label,0), tf.expand_dims(logit,0))
-    vars_ = [tf_s_scale, *tf_DM, *tf_DP, *tf_SM, *tf_SP]  
+        logit   = tf.reduce_sum(photons)            # scalar
+
+        y_true  = tf.expand_dims(label, 0)          # shape (1,)
+        y_logit = tf.expand_dims(logit, 0)          # shape (1,)
+        loss    = loss_fn(y_true, y_logit)          
+
+    vars_ = [tf_s_scale, *tf_DM, *tf_DP, *tf_SM, *tf_SP]
     grads = tape.gradient(loss, vars_)
     opt.apply_gradients(zip(grads, vars_))
+
     if step % 5 == 0:
         gnorms = [tf.norm(g).numpy() if g is not None else 0.0 for g in grads]
         print(f"step {step:4d}  loss={loss.numpy():.4f}  "
               f"gnorms={['%.1e'%n for n in gnorms[:6]]}")
 
 # --------- Evaluate and print AUC ---------
-def predict_logits(jets_tensor):
-    logits = []
+def predict_prob(jets_tensor):
+    """Return an array of P(signal) for each jet."""
+    probs = []
     for jet in jets_tensor:
-        state = eng.run(prog, args=make_args(jet)).state
+        if eng.run_progs:
+            eng.reset()
+        state   = eng.run(prog, args=make_args(jet)).state
         photons = tf.stack([state.mean_photon(m) for m in range(3)])
-        logit = tf.reduce_sum(photons).numpy()
-        logits.append(logit)
-    return np.array(logits)
+        logit   = tf.reduce_sum(photons)
+        probs.append(logit_to_prob(logit).numpy())
+    return np.asarray(probs)
 
-logits_val = predict_logits(jets_val)
-auc_val = roc_auc_score(labels_val.numpy(), logits_val)
+# validation ----------------------------------------------------------
+prob_val = predict_prob(jets_val)
+auc_val  = roc_auc_score(labels_val.numpy(), prob_val)
 print(f"Validation AUC: {auc_val:.4f}")
 
-logits_test = predict_logits(jets_test)
-auc_test = roc_auc_score(labels_test.numpy(), logits_test)
+# test ----------------------------------------------------------------
+prob_test = predict_prob(jets_test)
+auc_test  = roc_auc_score(labels_test.numpy(), prob_test)
 print(f"Test AUC: {auc_test:.4f}")
