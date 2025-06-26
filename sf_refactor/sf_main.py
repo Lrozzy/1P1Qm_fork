@@ -1,12 +1,10 @@
 import strawberryfields as sf
-from strawberryfields.ops import Dgate, Sgate, BSgate, CXgate
 import tensorflow as tf
 import numpy as np
-import h5py
 import os, random
 import argparse
 from helpers.plotting import * 
-from circuits import symbolic_circuit
+from circuits import default_circuit, new_circuit
 from helpers.utils import load_data, get_loss_fn
 from sklearn.metrics import roc_auc_score
 
@@ -14,12 +12,15 @@ from sklearn.metrics import roc_auc_score
 dim_cutoff      = 10 # fock cutoff dim
 wires           = 4 # number of particles per jet (1 wire per particle) DO NOT GO ABOVE 4 (memory blows up)
 layers          = 1
-steps           = 50
+steps           = 100
 learning_rate   = 0.05
 loss_fn         = "bce" # loss function: "bce" or "mse"
 train_jets      = 1000
 val_jets        = 400
 test_jets       = 1000 # Inference is not expensive!
+
+# Circuit type
+which_circuit = "new"  # "default" or "new"
 
 # Paths to data files
 data_dir        = "/home/hep/lr1424/1P1Qm_fork/flat_train/TTBar+ZJets_flat.h5"
@@ -28,7 +29,7 @@ test_dir        = "/home/hep/lr1424/1P1Qm_fork/flat_test/TTBar+ZJets_flat.h5"
 save_dir        = "/home/hep/lr1424/1P1Qm_fork/sf_refactor/saved_models_sf"
 
 # Debugging
-cli_test = False
+cli_test = False # Just run the code without saving models or plots, useful for quick tests
 
 parser = argparse.ArgumentParser(description="Run Strawberry Fields SF Simple Model")
 parser.add_argument('-name', type=str, help='Name for this run (used for saving models/plots)')
@@ -92,6 +93,7 @@ if cli_test == False:
         "steps": steps,
         "learning_rate": learning_rate,
         "loss_fn": loss_fn,
+        "which_circuit": which_circuit,
         "train_jets": train_jets,
         "val_jets": val_jets,
         "test_jets": test_jets,
@@ -114,6 +116,7 @@ print(f"Layers: {layers}", flush=True)
 print(f"Steps: {steps}", flush=True)
 print(f"Learning rate: {learning_rate}", flush=True)
 print(f"Loss function: {loss_fn}", flush=True)
+print(f"Which circuit: {which_circuit}", flush=True)
 print(f"Train jets: {train_jets}", flush=True)
 print(f"Validation jets: {val_jets}", flush=True)
 print(f"Test jets: {test_jets}", flush=True)
@@ -137,6 +140,11 @@ eta = [prog.params(f"eta{w}") for w in range(wires)]
 phi = [prog.params(f"phi{w}") for w in range(wires)]
 pt  = [prog.params(f"pt{w}")  for w in range(wires)]
 
+# Extra variables for trainable cx gates
+cx_pairs = [(0,1), (0,2), (0,3), (1,2), (1,3), (2,3)]
+cx_theta = { (a,b): prog.params(f"cx_theta_{a}_{b}")
+                 for (a,b) in cx_pairs }
+
 weights = {
     's_scale': s_scale,
     **{f'disp_mag_{w}': disp_mag[w] for w in range(wires)},
@@ -146,10 +154,14 @@ weights = {
     **{f'eta_{w}': eta[w] for w in range(wires)},
     **{f'phi_{w}': phi[w] for w in range(wires)},
     **{f'pt_{w}': pt[w] for w in range(wires)},
+    **{f"cx_theta_{a}_{b}": cx_theta[(a,b)] for (a,b) in cx_pairs},
 }
 
 # -------- Circuit architecture ----------
-prog = symbolic_circuit(prog, wires, weights)
+if which_circuit == "new":
+    prog = new_circuit(prog, wires, weights)
+else:
+    prog = default_circuit(prog, wires, weights)
 
 # -------- Initialise variables ----------
 # print("Initialising variables...", flush=True)
@@ -159,6 +171,9 @@ tf_disp_mag = [tf.Variable(rnd(())) for _ in range(wires)]
 tf_disp_phase = [tf.Variable(rnd(())) for _ in range(wires)]
 tf_squeeze_mag = [tf.Variable(rnd(())) for _ in range(wires)]
 tf_squeeze_phase = [tf.Variable(rnd(())) for _ in range(wires)]
+
+# Extra variables for trainable cx gates
+tf_cx_theta = { (a,b): tf.Variable(rnd(())) for (a,b) in cx_pairs }
 
 # -------- Feature scaling ----------
 # Define assumed limits for features
@@ -190,6 +205,9 @@ def make_args(jet):
         d[f"eta{w}"] = scale_feature(jet[w, 0], "eta")
         d[f"phi{w}"] = scale_feature(jet[w, 1], "phi")
         d[f"pt{w}"]  = scale_feature(jet[w, 2], "pt")
+    if which_circuit == "new":
+        for (a, b) in cx_pairs:
+            d[f"cx_theta_{a}_{b}"] = tf_cx_theta[(a, b)]
     return d
 
 loss_fn, logit_to_prob = get_loss_fn(loss_fn)
@@ -217,7 +235,10 @@ for step in range(steps):
         y_logit = tf.expand_dims(logit, 0)          # shape (1,)
         loss    = loss_fn(y_true, y_logit)          
 
-    vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase]
+    if which_circuit == "new":
+        vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase, *tf_cx_theta.values()]
+    else:
+        vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase]
     grads = tape.gradient(loss, vars_)
     opt.apply_gradients(zip(grads, vars_))
     
