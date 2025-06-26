@@ -1,5 +1,7 @@
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_auc_score, roc_curve
+import mplhep as hep
+hep.style.use("CMS")
 
 def plot_roc_curve(labels, scores, save_path):
     """Calculates and plots the ROC curve, saving it to a file."""

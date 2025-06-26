@@ -1,26 +1,34 @@
 import strawberryfields as sf
 from strawberryfields.ops import Dgate, Sgate, BSgate, CXgate
-import tensorflow as tf, numpy as np, h5py, os, random
+import tensorflow as tf
+import numpy as np
+import h5py
+import os, random
 import argparse
-from plotting import *
+from helpers.plotting import * 
+from circuits import symbolic_circuit
+from helpers.utils import load_data, get_loss_fn
 from sklearn.metrics import roc_auc_score
 
 # ----------  hyper-params ----------
-dim_cutoff      = 10                 # fock cutoff dim
-wires           = 4
+dim_cutoff      = 10 # fock cutoff dim
+wires           = 4 # number of particles per jet (1 wire per particle) DO NOT GO ABOVE 4 (memory blows up)
 layers          = 1
-steps           = 100
-learning_rate   = 0.01
-loss_fn         = "bce"           # loss function: "bce" or "mse"
-train_jets      = 2000
-val_jets        = 200
-test_jets       = 200
+steps           = 50
+learning_rate   = 0.05
+loss_fn         = "bce" # loss function: "bce" or "mse"
+train_jets      = 1000
+val_jets        = 400
+test_jets       = 1000 # Inference is not expensive!
 
 # Paths to data files
 data_dir        = "/home/hep/lr1424/1P1Qm_fork/flat_train/TTBar+ZJets_flat.h5"
 val_dir         = "/home/hep/lr1424/1P1Qm_fork/flat_val/TTBar+ZJets_flat.h5"
 test_dir        = "/home/hep/lr1424/1P1Qm_fork/flat_test/TTBar+ZJets_flat.h5"
 save_dir        = "/home/hep/lr1424/1P1Qm_fork/sf_refactor/saved_models_sf"
+
+# Debugging
+cli_test = False
 
 parser = argparse.ArgumentParser(description="Run Strawberry Fields SF Simple Model")
 parser.add_argument('-name', type=str, help='Name for this run (used for saving models/plots)')
@@ -37,6 +45,7 @@ parser.add_argument('--data_dir', type=str, default=data_dir, help='Training dat
 parser.add_argument('--val_dir', type=str, default=val_dir, help='Validation data file')
 parser.add_argument('--test_dir', type=str, default=test_dir, help='Test data file')
 parser.add_argument('--save_dir', type=str, default=save_dir, help='Directory to save models/plots')
+parser.add_argument('--cli_test', action='store_true', help='Run in CLI test mode (no saving, no plotting)')
 args = parser.parse_args()
 
 # Override hyper-params if specified in args
@@ -53,6 +62,7 @@ data_dir      = args.data_dir if args.data_dir else data_dir
 val_dir       = args.val_dir if args.val_dir else val_dir
 test_dir      = args.test_dir if args.test_dir else test_dir
 save_dir      = args.save_dir if args.save_dir else save_dir
+cli_test      = args.cli_test if args.cli_test else cli_test
 
 # Run name
 if args.name:
@@ -71,8 +81,33 @@ else:
     while os.path.exists(f'{save_dir}/{run_name}'):
         run_name = f"{base_name}_{i}"
         i += 1
+
+# Save hyperparameters to a file
+if cli_test == False:
+    os.makedirs(os.path.join(save_dir, run_name), exist_ok=True)
+    hyperparams = {
+        "dim_cutoff": dim_cutoff,
+        "wires": wires,
+        "layers": layers,
+        "steps": steps,
+        "learning_rate": learning_rate,
+        "loss_fn": loss_fn,
+        "train_jets": train_jets,
+        "val_jets": val_jets,
+        "test_jets": test_jets,
+        "data_dir": data_dir,
+        "val_dir": val_dir,
+        "test_dir": test_dir,
+        "save_dir": save_dir,
+        "run_name": run_name,
+    }
+    hyperparams_path = os.path.join(save_dir, run_name, "hyperparams.txt")
+    with open(hyperparams_path, "w") as f:
+        for k, v in hyperparams.items():
+            f.write(f"{k}: {v}\n")
 # -----------------------------------
 # Print hyperparams
+print("HYPERPARAMETERS:")
 print(f"Dimension cutoff: {dim_cutoff}", flush=True)
 print(f"Wires: {wires}", flush=True)
 print(f"Layers: {layers}", flush=True)
@@ -83,56 +118,47 @@ print(f"Train jets: {train_jets}", flush=True)
 print(f"Validation jets: {val_jets}", flush=True)
 print(f"Test jets: {test_jets}", flush=True)
 print(f"Run name: {run_name}", flush=True)
+print("------------------------------------", flush=True)
 
-# ----------  load datasets ----------
-def load_data(path, max_jets=train_jets):
-    with h5py.File(path, "r") as f:
-        jet_constituents = f["jetConstituentsList"][:max_jets, :wires, :]     # (N,4,3)
-        truth_labels = f["truth_labels"][:max_jets].astype(np.float32)     # (N,)
-    return tf.convert_to_tensor(jet_constituents, tf.float32), tf.convert_to_tensor(truth_labels, tf.float32)
-
-jets, labels = load_data(data_dir, max_jets=train_jets)
-jets_val, labels_val = load_data(val_dir, max_jets=val_jets)
-jets_test, labels_test = load_data(test_dir, max_jets=test_jets)
+# ----------  load datasets ---------- 
+jets, labels = load_data(data_dir, max_jets=train_jets, wires=wires)
+jets_val, labels_val = load_data(val_dir, max_jets=val_jets, wires=wires)
+jets_test, labels_test = load_data(test_dir, max_jets=test_jets, wires=wires)
 
 # -------- symbolic circuit ----------
 # print("Starting symbolic circuit construction...", flush=True)
 prog = sf.Program(wires)
 s_scale = prog.params("s_scale")
-DM  = [prog.params(f"DM{w}") for w in range(wires)]
-DP  = [prog.params(f"DP{w}") for w in range(wires)]
-SM  = [prog.params(f"SM{w}") for w in range(wires)]
-SP  = [prog.params(f"SP{w}") for w in range(wires)]
+disp_mag  = [prog.params(f"disp_mag{w}") for w in range(wires)] # disp_mag = Displacement Magnitude
+disp_phase  = [prog.params(f"disp_phase{w}") for w in range(wires)] # disp_phase = Displacement Phase
+squeeze_mag  = [prog.params(f"squeeze_mag{w}") for w in range(wires)] # squeeze_mag = Squeezing Magnitude
+squeeze_phase  = [prog.params(f"squeeze_phase{w}") for w in range(wires)] # squeeze_phase = Squeezing Phase
 eta = [prog.params(f"eta{w}") for w in range(wires)]
 phi = [prog.params(f"phi{w}") for w in range(wires)]
 pt  = [prog.params(f"pt{w}")  for w in range(wires)]
 
-# -------- Circuit architecture ----------
-with prog.context as q:
-    scale = 10.0 / (1.0 + sf.math.exp(-s_scale)) + 0.01
-    for w in range(wires):
-        Sgate(eta[w], pt[w]*phi[w]/2) | q[w] # Encode eta and phi
-        Dgate(scale*pt[w], eta[w])    | q[w] # Encode pt and eta
-    for a,b in [(0,1),(0,2),(0,3),(1,2),(1,3),(2,3)]:
-        CXgate(1.0) | (q[a], q[b]) # Entangle wires
+weights = {
+    's_scale': s_scale,
+    **{f'disp_mag_{w}': disp_mag[w] for w in range(wires)},
+    **{f'disp_phase_{w}': disp_phase[w] for w in range(wires)},
+    **{f'squeeze_mag_{w}': squeeze_mag[w] for w in range(wires)},
+    **{f'squeeze_phase_{w}': squeeze_phase[w] for w in range(wires)},
+    **{f'eta_{w}': eta[w] for w in range(wires)},
+    **{f'phi_{w}': phi[w] for w in range(wires)},
+    **{f'pt_{w}': pt[w] for w in range(wires)},
+}
 
-    all_wires_list = list(range(wires))
-    for i in range(wires):
-        idx1 = all_wires_list[i]
-        idx2 = all_wires_list[(i + 1) % wires]
-        BSgate(np.pi / 4.0, np.pi / 2.0) | (q[idx1], q[idx2]) # Further entanglement
-    for w in range(wires):
-        Sgate(SM[w], SP[w]) | q[w] # Encode trainable parameters
-        Dgate(DM[w], DP[w]) | q[w] # Encode trainable parameters
+# -------- Circuit architecture ----------
+prog = symbolic_circuit(prog, wires, weights)
 
 # -------- Initialise variables ----------
 # print("Initialising variables...", flush=True)
 rnd = tf.random_uniform_initializer(-0.1, 0.1)
 tf_s_scale = tf.Variable(rnd(()))
-tf_DM = [tf.Variable(rnd(())) for _ in range(wires)]
-tf_DP = [tf.Variable(rnd(())) for _ in range(wires)]
-tf_SM = [tf.Variable(rnd(())) for _ in range(wires)]
-tf_SP = [tf.Variable(rnd(())) for _ in range(wires)]
+tf_disp_mag = [tf.Variable(rnd(())) for _ in range(wires)]
+tf_disp_phase = [tf.Variable(rnd(())) for _ in range(wires)]
+tf_squeeze_mag = [tf.Variable(rnd(())) for _ in range(wires)]
+tf_squeeze_phase = [tf.Variable(rnd(())) for _ in range(wires)]
 
 # -------- Feature scaling ----------
 # Define assumed limits for features
@@ -157,45 +183,14 @@ def scale_feature(value, name):
 def make_args(jet):
     d = {"s_scale": tf_s_scale}
     for w in range(wires):
-        d[f"DM{w}"] = tf_DM[w]
-        d[f"DP{w}"] = tf_DP[w]
-        d[f"SM{w}"] = tf_SM[w]
-        d[f"SP{w}"] = tf_SP[w]
+        d[f"disp_mag{w}"] = tf_disp_mag[w]
+        d[f"disp_phase{w}"] = tf_disp_phase[w]
+        d[f"squeeze_mag{w}"] = tf_squeeze_mag[w]
+        d[f"squeeze_phase{w}"] = tf_squeeze_phase[w]
         d[f"eta{w}"] = scale_feature(jet[w, 0], "eta")
         d[f"phi{w}"] = scale_feature(jet[w, 1], "phi")
         d[f"pt{w}"]  = scale_feature(jet[w, 2], "pt")
     return d
-
-def get_loss_fn(loss_type='bce'):
-    """
-    Returns a function loss_fn(y_true, logit) so the training loop
-    doesn't need to care whether we are using BCE (logits) or
-    MSE (probabilities).
-    """
-    if loss_type.lower() == "bce":
-        bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
-
-        # BCE expects logits directly
-        def _loss(y_true, logit):
-            return bce(y_true, logit)
-
-        # probability to feed to AUC afterwards
-        _prob = lambda logit: tf.sigmoid(logit)
-
-    elif loss_type.lower() == "mse":
-        mse = tf.keras.losses.MeanSquaredError()
-
-        # MSE should see probabilities in [0,1]
-        def _loss(y_true, logit):
-            return mse(y_true, tf.sigmoid(logit))
-
-        _prob = lambda logit: tf.sigmoid(logit)
-
-    else:
-        raise ValueError(f"Unknown loss type: {loss_type} (use 'bce' or 'mse')")
-
-    return _loss, _prob
-
 
 loss_fn, logit_to_prob = get_loss_fn(loss_fn)
 opt = tf.keras.optimizers.Adam(learning_rate)
@@ -222,7 +217,7 @@ for step in range(steps):
         y_logit = tf.expand_dims(logit, 0)          # shape (1,)
         loss    = loss_fn(y_true, y_logit)          
 
-    vars_ = [tf_s_scale, *tf_DM, *tf_DP, *tf_SM, *tf_SP]
+    vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase]
     grads = tape.gradient(loss, vars_)
     opt.apply_gradients(zip(grads, vars_))
     
@@ -291,10 +286,11 @@ print("Training completed.", flush=True)
 print(f"Final test AUC: {auc_test:.4f}", flush=True)
 
 # Generate and save plots
-plots_dir = os.path.join(save_dir, run_name, 'plots')
-os.makedirs(plots_dir, exist_ok=True)
-roc_plot_path = os.path.join(plots_dir, 'roc_curve.png')
-score_hist_path = os.path.join(plots_dir, 'score_histogram.png')
-plot_roc_curve(labels_test.numpy(), prob_test, roc_plot_path)
-plot_score_histogram(labels_test.numpy(), prob_test, score_hist_path)
-print(f"Plots saved to {plots_dir}")
+if cli_test == False:
+    plots_dir = os.path.join(save_dir, run_name, 'plots')
+    os.makedirs(plots_dir, exist_ok=True)
+    roc_plot_path = os.path.join(plots_dir, 'roc_curve.png')
+    score_hist_path = os.path.join(plots_dir, 'score_histogram.png')
+    plot_roc_curve(labels_test.numpy(), prob_test, roc_plot_path)
+    plot_score_histogram(labels_test.numpy(), prob_test, score_hist_path)
+    print(f"Plots saved to {plots_dir}")
