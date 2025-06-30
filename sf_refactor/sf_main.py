@@ -8,20 +8,24 @@ from circuits import default_circuit, new_circuit
 from helpers.utils import load_data, get_loss_fn
 from sklearn.metrics import roc_auc_score
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+tf.get_logger().setLevel('ERROR')
+
 # ----------  hyper-params ----------
-dim_cutoff      = 10 # fock cutoff dim
+dim_cutoff      = 8 # fock cutoff dim - (8 is about the limit with new batched system)
 wires           = 4 # number of particles per jet (1 wire per particle) DO NOT GO ABOVE 4 (memory blows up)
 layers          = 1
 steps           = 100
-learning_rate   = 0.01
+learning_rate   = 0.001 
+batch_size      = 8 # (8 is about the limit with new batched system)
 train_jets      = 1000
 val_jets        = 200
 test_jets       = 1000 # Inference is not expensive!
 
 # Loss function and activation parameters
 loss_fn         = "bce" # loss function: "bce" or "mse"
-shift_sigmoid = 6 # Shift the sigmoid to the left, useful for shifted sigmoid activation
-tanh = False # Use tanh activation instead of sigmoid
+shift_sigmoid = None # None or int<10. Shift the sigmoid to the left, useful for shifted sigmoid activation
+tanh = False # True or False. Use tanh activation instead of sigmoid
 
 # Circuit type
 which_circuit = "new"  # "default" or "new"
@@ -42,6 +46,7 @@ parser.add_argument('--wires', type=int, default=wires, help='Number of wires')
 parser.add_argument('--layers', type=int, default=layers, help='Number of layers')
 parser.add_argument('--steps', type=int, default=steps, help='Number of training steps')
 parser.add_argument('--learning_rate', type=float, default=learning_rate, help='Learning rate')
+parser.add_argument('--batch_size', type=int, default=batch_size, help='Training batch size')
 parser.add_argument('--loss_fn', type=str, default=loss_fn, help='Loss function: "bce" or "mse"')
 parser.add_argument('--shift_sigmoid', type=float, default=shift_sigmoid, help='Shift the sigmoid to the left (useful for shifted sigmoid activation)')
 parser.add_argument('--tanh', action='store_true', help='Use tanh activation instead of sigmoid')
@@ -62,6 +67,7 @@ wires         = args.wires if args.wires else wires
 layers        = args.layers if args.layers else layers
 steps         = args.steps if args.steps else steps
 learning_rate = args.learning_rate if args.learning_rate else learning_rate
+batch_size    = args.batch_size if args.batch_size else batch_size
 loss_fn       = args.loss_fn if args.loss_fn else loss_fn
 shift_sigmoid = args.shift_sigmoid if args.shift_sigmoid is not None else shift_sigmoid
 tanh          = args.tanh if args.tanh else tanh
@@ -102,6 +108,7 @@ if cli_test == False:
         "layers": layers,
         "steps": steps,
         "learning_rate": learning_rate,
+        "batch_size": batch_size,
         "loss_fn": loss_fn,
         "shift_sigmoid": shift_sigmoid,
         "tanh": tanh,
@@ -119,6 +126,12 @@ if cli_test == False:
     with open(params_path, "w") as f:
         for k, v in params.items():
             f.write(f"{k}: {v}\n")
+            
+if shift_sigmoid is not None and tanh:
+    print("Cannot use both shift_sigmoid and tanh at the same time. Instead, using regular sigmoid activation.", flush=True)
+    shift_sigmoid = None
+    tanh = None
+
 # -----------------------------------
 # Print parameters
 print("PARAMETERS:")
@@ -127,9 +140,13 @@ print(f"Wires: {wires}", flush=True)
 print(f"Layers: {layers}", flush=True)
 print(f"Steps: {steps}", flush=True)
 print(f"Learning rate: {learning_rate}", flush=True)
+print(f"Batch size: {batch_size}", flush=True)
 print(f"Loss function: {loss_fn}", flush=True)
-print(f"\t Shift sigmoid: {shift_sigmoid}", flush=True)
-print(f"\t Tanh activation: {tanh}", flush=True)
+if shift_sigmoid is not None or tanh is not None:
+    print(f"\t Shift sigmoid: {shift_sigmoid}", flush=True)
+    print(f"\t Tanh activation: {tanh}", flush=True)
+else:
+    print("\t Regular sigmoid activation", flush=True)
 print(f"Which circuit: {which_circuit}", flush=True)
 print(f"Train jets: {train_jets}", flush=True)
 print(f"Validation jets: {val_jets}", flush=True)
@@ -137,8 +154,7 @@ print(f"Test jets: {test_jets}", flush=True)
 print(f"Run name: {run_name}", flush=True)
 print("------------------------------------", flush=True)
 
-if shift_sigmoid is not None and tanh:
-    raise ValueError("Cannot use both shift_sigmoid and tanh at the same time.")
+
 
 # ----------  load datasets ---------- 
 jets, labels = load_data(data_dir, max_jets=train_jets, wires=wires)
@@ -211,16 +227,18 @@ def scale_feature(value, name):
     return (value - a_min) / (a_max - a_min) * (f_max - f_min) + f_min
 
 # Create arguments for the SF program (map symbolic variables to tensors)
-def make_args(jet):
+def make_args(jet_batch):
+    # This function now accepts a batch of jets
     d = {"s_scale": tf_s_scale}
     for w in range(wires):
         d[f"disp_mag{w}"] = tf_disp_mag[w]
         d[f"disp_phase{w}"] = tf_disp_phase[w]
         d[f"squeeze_mag{w}"] = tf_squeeze_mag[w]
         d[f"squeeze_phase{w}"] = tf_squeeze_phase[w]
-        d[f"eta{w}"] = scale_feature(jet[w, 0], "eta")
-        d[f"phi{w}"] = scale_feature(jet[w, 1], "phi")
-        d[f"pt{w}"]  = scale_feature(jet[w, 2], "pt")
+        # Slicing the batch to get all values for a specific feature across the batch
+        d[f"eta{w}"] = scale_feature(jet_batch[:, w, 0], "eta")
+        d[f"phi{w}"] = scale_feature(jet_batch[:, w, 1], "phi")
+        d[f"pt{w}"]  = scale_feature(jet_batch[:, w, 2], "pt")
     if which_circuit == "new":
         for (a, b) in cx_pairs:
             d[f"cx_theta_{a}_{b}"] = tf_cx_theta[(a, b)]
@@ -228,23 +246,28 @@ def make_args(jet):
 
 opt = tf.keras.optimizers.Adam(learning_rate)
 # print("Starting Engine...", flush=True)
-eng = sf.Engine("tf", backend_options={"cutoff_dim": dim_cutoff})
+eng = sf.Engine("tf", backend_options={"cutoff_dim": dim_cutoff, "batch_size": batch_size})
 
 # -------- training loop ----------
 print("Starting training...", flush=True)
 for step in range(steps):
-    # total_train_loss = 0
-    idx   = random.randrange(train_jets)
-    jet   = jets[idx]
-    label = labels[idx]
+    # Select a random batch of jets
+    batch_indices = np.random.choice(train_jets, size=batch_size)
+    jet_batch   = tf.gather(jets, batch_indices)
+    label_batch = tf.gather(labels, batch_indices)
 
     if eng.run_progs:
         eng.reset()
 
     with tf.GradientTape() as tape:
-        state   = eng.run(prog, args=make_args(jet)).state
-        photons = tf.stack([state.mean_photon(m) for m in range(3)])
-        loss, logit_to_prob = get_loss_fn(photons, label, shift_sigmoid=shift_sigmoid, tanh=tanh, loss_type=loss_fn)
+        # Run the circuit for the entire batch
+        state   = eng.run(prog, args=make_args(jet_batch)).state
+        # state.mean_photon(m) returns a tuple (mean, variance), we only want the mean
+        photons = tf.stack([state.mean_photon(m)[0] for m in range(3)], axis=1)
+        # Calculate loss for the batch
+        loss_vector, logit_to_prob = get_loss_fn(photons, label_batch, shift_sigmoid=shift_sigmoid, tanh=tanh, loss_type=loss_fn)
+        # Average the loss over the batch for a stable gradient
+        loss = tf.reduce_mean(loss_vector)
 
     if which_circuit == "new":
         vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase, *tf_cx_theta.values()]
@@ -253,25 +276,40 @@ for step in range(steps):
     grads = tape.gradient(loss, vars_)
     opt.apply_gradients(zip(grads, vars_))
 
-    if (step) % 5 == 0 and step % 20 != 0 or step != steps - 1:
+    if step % 5 == 0 and (step + 1) % 20 != 0 and (step + 1) != steps:
         print(f"Step {step}/{steps} - Training Loss: {loss:.4f}", flush=True)
     # -------- validation step ----------
-    if (step) > 1 and (step) % 20 == 0 or step == steps - 1:
+    if (step + 1) % 20 == 0 or (step + 1) == steps:
         val_probs_pass = []
         val_losses_pass = []
-        for i in range(val_jets):
-            jet_val   = jets_val[i]
-            label_val = labels_val[i]
+        
+        # Process validation set in batches
+        num_val_batches = (val_jets + batch_size - 1) // batch_size
+        for i in range(num_val_batches):
+            start = i * batch_size
+            end = start + batch_size
+            jet_batch_val = jets_val[start:end]
+            label_batch_val = labels_val[start:end]
+
+            actual_batch_size = jet_batch_val.shape[0]
+            # Pad the last batch if it's smaller than batch_size
+            if actual_batch_size < batch_size:
+                padding_size = batch_size - actual_batch_size
+                padding_jets = tf.zeros((padding_size, jets_val.shape[1], jets_val.shape[2]), dtype=tf.float32)
+                jet_batch_val = tf.concat([jet_batch_val, padding_jets], axis=0)
+                padding_labels = tf.zeros((padding_size,), dtype=tf.float32)
+                label_batch_val = tf.concat([label_batch_val, padding_labels], axis=0)
 
             if eng.run_progs:
                 eng.reset()
 
-            state   = eng.run(prog, args=make_args(jet_val)).state
-            photons = tf.stack([state.mean_photon(m) for m in range(3)])
-            val_loss, val_prob = get_loss_fn(photons, label_val, shift_sigmoid=shift_sigmoid, tanh=tanh, loss_type=loss_fn)
+            state   = eng.run(prog, args=make_args(jet_batch_val)).state
+            photons = tf.stack([state.mean_photon(m)[0] for m in range(3)], axis=1)
+            val_loss_vector, val_prob = get_loss_fn(photons, label_batch_val, shift_sigmoid=shift_sigmoid, tanh=tanh, loss_type=loss_fn)
             
-            val_probs_pass.append(val_prob.numpy())
-            val_losses_pass.append(val_loss.numpy())
+            # Only store results for the actual validation data, not the padding
+            val_probs_pass.extend(val_prob.numpy()[:actual_batch_size])
+            val_losses_pass.extend(val_loss_vector.numpy()[:actual_batch_size])
 
         avg_val_loss = np.mean(val_losses_pass)
         auc_val = roc_auc_score(labels_val.numpy(), np.asarray(val_probs_pass))
@@ -283,24 +321,42 @@ for step in range(steps):
 def predict_prob(jets_tensor, labels):
     """Return an array of P(signal) for each jet."""
     probs = []
-    total = jets_tensor.shape[0]
-    for i, jet in enumerate(jets_tensor):
-        label = labels[i]
+    total_jets = jets_tensor.shape[0]
+    num_batches = (total_jets + batch_size - 1) // batch_size
+
+    for i in range(num_batches):
+        start = i * batch_size
+        end = start + batch_size
+        jet_batch = jets_tensor[start:end]
+        label_batch = labels[start:end]
+
+        actual_batch_size = jet_batch.shape[0]
+        # Pad the last batch if it's smaller than batch_size
+        if actual_batch_size < batch_size:
+            padding_size = batch_size - actual_batch_size
+            padding_jets = tf.zeros((padding_size, jets_tensor.shape[1], jets_tensor.shape[2]), dtype=tf.float32)
+            jet_batch = tf.concat([jet_batch, padding_jets], axis=0)
+            padding_labels = tf.zeros((padding_size,), dtype=tf.float32)
+            label_batch = tf.concat([label_batch, padding_labels], axis=0)
+
         if eng.run_progs:
             eng.reset()
-        state   = eng.run(prog, args=make_args(jet)).state
-        photons = tf.stack([state.mean_photon(m) for m in range(3)])
-        loss, prob = get_loss_fn(photons, label, shift_sigmoid=shift_sigmoid, tanh=tanh, loss_type=loss_fn)
-        probs.append(prob.numpy())
-        if (i+1) % 50 == 0 or (i+1) == total:
-            print(f"  Processed {i+1}/{total} jets", flush=True)
+        state   = eng.run(prog, args=make_args(jet_batch)).state
+        photons = tf.stack([state.mean_photon(m)[0] for m in range(3)], axis=1)
+        loss, prob = get_loss_fn(photons, label_batch, shift_sigmoid=shift_sigmoid, tanh=tanh, loss_type=loss_fn)
+        
+        # Only store results for the actual data, not the padding
+        probs.extend(prob.numpy()[:actual_batch_size])
+        
+        if (end) >= total_jets or (i+1) % 5 == 0:
+             print(f"  Processed {min(end, total_jets)}/{total_jets} jets", flush=True)
+
     return np.asarray(probs)
 
 # test ----------------------------------------------------------------
 print("Predicting on test set...", flush=True)
 prob_test = predict_prob(jets_test, labels_test)
 auc_test  = roc_auc_score(labels_test.numpy(), prob_test)
-# print(f"Test AUC: {auc_test:.4f}", flush=True)
 
 # summary -------------------------------------------------
 print("Training completed.", flush=True)

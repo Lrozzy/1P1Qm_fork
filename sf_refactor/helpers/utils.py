@@ -11,51 +11,41 @@ def load_data(path, max_jets, wires):
 
 def get_loss_fn(photons, label, shift_sigmoid=None, tanh = False, loss_type="bce", dim_cutoff=None):
     """
-    Returns a function loss_fn(y_true, logit) so the training loop
-    doesn't need to care whether we are using BCE (logits) or
-    MSE (probabilities).
+    Calculates loss and probabilities from photon counts.
+    The logit is taken as the mean photon number across all modes.
     """
-    from_logits = False
+    # The logit is the mean of the photon counts over the modes for each item in the batch.
+    logit = tf.reduce_mean(photons, axis=1) # axis=1 is the mode dimension
 
-    y_true  = tf.expand_dims(label, 0)          # shape (1,)
-    logit   = tf.reduce_mean(photons) # used to use reduce_sum but mean makes more sense
     if dim_cutoff is not None:
-        logit /= dim_cutoff  # allow the states to have up to 10 photons
+        logit /= dim_cutoff
 
-    if loss_type.lower() == "bce":
-        if shift_sigmoid is not None:
-            logit -= shift_sigmoid  # shift the sigmoid to the left
-            from_logits = True
-            prob = tf.sigmoid(logit)
-        elif tanh:
-            logit = tf.math.tanh(logit)
-            from_logits = False
-            prob = (logit + 1.0) / 2.0
-        else:
-            from_logits = True
-            prob = tf.sigmoid(logit)
-
-        y_logit = tf.expand_dims(logit, 0)
-        bce = tf.keras.losses.BinaryCrossentropy(from_logits=from_logits) # Applies sigmoid internally
-
-        def _loss(y_true, logit):
-            return bce(y_true, logit)
-
-    elif loss_type.lower() == "mse":
-        y_logit = tf.expand_dims(logit, 0)
-        mse = tf.keras.losses.MeanSquaredError()
-
-        # MSE should see probabilities in [0,1]
-        def _loss(y_true, logit):
-            return mse(y_true, tf.sigmoid(logit))
-
+    if loss_type.lower() == "mse":
+        # For MSE, the output should be a probability.
         prob = tf.sigmoid(logit)
+        loss = tf.keras.losses.mean_squared_error(label, prob)
+        return loss, prob
+
+    elif loss_type.lower() == "bce":
+        # For BCE, we work with logits.
+        if tanh:
+            # If using tanh, the output is already in [-1, 1]. Scale to [0, 1] for probability.
+            # The loss function should not see logits in this case.
+            prob = (tf.tanh(logit) + 1) / 2.0
+            # Manually compute binary cross-entropy to ensure per-sample losses
+            epsilon = 1e-7  # Small value to prevent log(0)
+            prob_clipped = tf.clip_by_value(prob, epsilon, 1 - epsilon)
+            loss = -(label * tf.math.log(prob_clipped) + (1 - label) * tf.math.log(1 - prob_clipped))
+        else:
+            # If using sigmoid, we can use the more numerically stable from_logits=True.
+            logit_final = logit
+            if shift_sigmoid is not None:
+                logit_final = logit - shift_sigmoid
+
+            loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=label, logits=logit_final)
+            prob = tf.sigmoid(logit_final)
+        
+        return loss, prob
 
     else:
         raise ValueError(f"Unknown loss type: {loss_type} (use 'bce' or 'mse')")
-    
-    loss_fn = _loss
-    
-    loss = loss_fn(y_true, y_logit)
-
-    return loss, prob 
