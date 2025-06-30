@@ -9,7 +9,7 @@ def load_data(path, max_jets, wires):
         truth_labels = f["truth_labels"][:max_jets].astype(np.float32)     # (N,)
     return tf.convert_to_tensor(jet_constituents, tf.float32), tf.convert_to_tensor(truth_labels, tf.float32)
 
-def get_loss_fn(photons, label, shift_sigmoid=None, tanh = False, loss_type="bce", dim_cutoff=None):
+def get_loss_fn(photons, label, bias=0.0, tanh = False, loss_type="bce", dim_cutoff=None):
     """
     Calculates loss and probabilities from photon counts.
     The logit is taken as the mean photon number across all modes.
@@ -38,9 +38,7 @@ def get_loss_fn(photons, label, shift_sigmoid=None, tanh = False, loss_type="bce
             loss = -(label * tf.math.log(prob_clipped) + (1 - label) * tf.math.log(1 - prob_clipped))
         else:
             # If using sigmoid, we can use the more numerically stable from_logits=True.
-            logit_final = logit
-            if shift_sigmoid is not None:
-                logit_final = logit - shift_sigmoid
+            logit_final = logit - bias
 
             loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=label, logits=logit_final)
             prob = tf.sigmoid(logit_final)

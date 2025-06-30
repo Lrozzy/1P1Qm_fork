@@ -3,6 +3,7 @@ import tensorflow as tf
 import numpy as np
 import os, random
 import argparse
+from datetime import datetime
 from helpers.plotting import * 
 from circuits import default_circuit, new_circuit
 from helpers.utils import load_data, get_loss_fn
@@ -24,7 +25,6 @@ test_jets       = 1000 # Inference is not expensive!
 
 # Loss function and activation parameters
 loss_fn         = "bce" # loss function: "bce" or "mse"
-shift_sigmoid = None # None or int<10. Shift the sigmoid to the left, useful for shifted sigmoid activation
 tanh = False # True or False. Use tanh activation instead of sigmoid
 
 # Circuit type
@@ -48,7 +48,6 @@ parser.add_argument('--steps', type=int, default=steps, help='Number of training
 parser.add_argument('--learning_rate', type=float, default=learning_rate, help='Learning rate')
 parser.add_argument('--batch_size', type=int, default=batch_size, help='Training batch size')
 parser.add_argument('--loss_fn', type=str, default=loss_fn, help='Loss function: "bce" or "mse"')
-parser.add_argument('--shift_sigmoid', type=float, default=shift_sigmoid, help='Shift the sigmoid to the left (useful for shifted sigmoid activation)')
 parser.add_argument('--tanh', action='store_true', help='Use tanh activation instead of sigmoid')
 parser.add_argument('--which_circuit', type=str, default=which_circuit, help='Circuit type: "default" or "new"')
 parser.add_argument('--train_jets', type=int, default=train_jets, help='Number of training jets')
@@ -69,7 +68,6 @@ steps         = args.steps if args.steps else steps
 learning_rate = args.learning_rate if args.learning_rate else learning_rate
 batch_size    = args.batch_size if args.batch_size else batch_size
 loss_fn       = args.loss_fn if args.loss_fn else loss_fn
-shift_sigmoid = args.shift_sigmoid if args.shift_sigmoid is not None else shift_sigmoid
 tanh          = args.tanh if args.tanh else tanh
 which_circuit = args.which_circuit if args.which_circuit else which_circuit
 train_jets    = args.train_jets if args.train_jets else train_jets
@@ -99,10 +97,14 @@ else:
         run_name = f"{base_name}_{i}"
         i += 1
 
+# Get current date and time
+now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 # Save parameters to a file
 if cli_test == False:
     os.makedirs(os.path.join(save_dir, run_name), exist_ok=True)
     params = {
+        "run_start_time": now,
         "dim_cutoff": dim_cutoff,
         "wires": wires,
         "layers": layers,
@@ -110,7 +112,6 @@ if cli_test == False:
         "learning_rate": learning_rate,
         "batch_size": batch_size,
         "loss_fn": loss_fn,
-        "shift_sigmoid": shift_sigmoid,
         "tanh": tanh,
         "which_circuit": which_circuit,
         "train_jets": train_jets,
@@ -127,13 +128,9 @@ if cli_test == False:
         for k, v in params.items():
             f.write(f"{k}: {v}\n")
             
-if shift_sigmoid is not None and tanh:
-    print("Cannot use both shift_sigmoid and tanh at the same time. Instead, using regular sigmoid activation.", flush=True)
-    shift_sigmoid = None
-    tanh = None
-
 # -----------------------------------
 # Print parameters
+print(f"Run started at: {now}", flush=True)
 print("PARAMETERS:")
 print(f"Dimension cutoff: {dim_cutoff}", flush=True)
 print(f"Wires: {wires}", flush=True)
@@ -142,11 +139,10 @@ print(f"Steps: {steps}", flush=True)
 print(f"Learning rate: {learning_rate}", flush=True)
 print(f"Batch size: {batch_size}", flush=True)
 print(f"Loss function: {loss_fn}", flush=True)
-if shift_sigmoid is not None or tanh is not None:
-    print(f"\t Shift sigmoid: {shift_sigmoid}", flush=True)
-    print(f"\t Tanh activation: {tanh}", flush=True)
+if tanh:
+    print("\t Tanh activation: True", flush=True)
 else:
-    print("\t Regular sigmoid activation", flush=True)
+    print("\t Sigmoid activation with trainable bias", flush=True)
 print(f"Which circuit: {which_circuit}", flush=True)
 print(f"Train jets: {train_jets}", flush=True)
 print(f"Validation jets: {val_jets}", flush=True)
@@ -177,22 +173,31 @@ pt  = [prog.params(f"pt{w}")  for w in range(wires)]
 cx_pairs = [(0,1), (0,2), (0,3), (1,2), (1,3), (2,3)]
 cx_theta = { (a,b): prog.params(f"cx_theta_{a}_{b}") for (a,b) in cx_pairs }
 
-weights = {
-    's_scale': s_scale,
-    **{f'disp_mag_{w}': disp_mag[w] for w in range(wires)},
-    **{f'disp_phase_{w}': disp_phase[w] for w in range(wires)},
-    **{f'squeeze_mag_{w}': squeeze_mag[w] for w in range(wires)},
-    **{f'squeeze_phase_{w}': squeeze_phase[w] for w in range(wires)},
-    **{f'eta_{w}': eta[w] for w in range(wires)},
-    **{f'phi_{w}': phi[w] for w in range(wires)},
-    **{f'pt_{w}': pt[w] for w in range(wires)},
-    **{f"cx_theta_{a}_{b}": cx_theta[(a,b)] for (a,b) in cx_pairs},
-}
-
 # -------- Circuit architecture ----------
 if which_circuit == "new":
+    weights = {
+        's_scale': s_scale,
+        **{f'disp_mag_{w}': disp_mag[w] for w in range(wires)},
+        **{f'disp_phase_{w}': disp_phase[w] for w in range(wires)},
+        **{f'squeeze_mag_{w}': squeeze_mag[w] for w in range(wires)},
+        **{f'squeeze_phase_{w}': squeeze_phase[w] for w in range(wires)},
+        **{f'eta_{w}': eta[w] for w in range(wires)},
+        **{f'phi_{w}': phi[w] for w in range(wires)},
+        **{f'pt_{w}': pt[w] for w in range(wires)},
+        **{f"cx_theta_{a}_{b}": cx_theta[(a,b)] for (a,b) in cx_pairs},
+    }
     prog = new_circuit(prog, wires, weights)
 else:
+    weights = {
+        's_scale': s_scale,
+        **{f'disp_mag_{w}': disp_mag[w] for w in range(wires)},
+        **{f'disp_phase_{w}': disp_phase[w] for w in range(wires)},
+        **{f'squeeze_mag_{w}': squeeze_mag[w] for w in range(wires)},
+        **{f'squeeze_phase_{w}': squeeze_phase[w] for w in range(wires)},
+        **{f'eta_{w}': eta[w] for w in range(wires)},
+        **{f'phi_{w}': phi[w] for w in range(wires)},
+        **{f'pt_{w}': pt[w] for w in range(wires)},
+    }
     prog = default_circuit(prog, wires, weights)
 
 # -------- Initialise variables ----------
@@ -203,6 +208,7 @@ tf_disp_mag = [tf.Variable(rnd(())) for _ in range(wires)]
 tf_disp_phase = [tf.Variable(rnd(())) for _ in range(wires)]
 tf_squeeze_mag = [tf.Variable(rnd(())) for _ in range(wires)]
 tf_squeeze_phase = [tf.Variable(rnd(())) for _ in range(wires)]
+tf_bias = tf.Variable(0.0, dtype=tf.float32) # Trainable bias
 
 # Extra variables for trainable cx gates
 tf_cx_theta = { (a,b): tf.Variable(rnd(())) for (a,b) in cx_pairs }
@@ -265,20 +271,20 @@ for step in range(steps):
         # state.mean_photon(m) returns a tuple (mean, variance), we only want the mean
         photons = tf.stack([state.mean_photon(m)[0] for m in range(3)], axis=1)
         # Calculate loss for the batch
-        loss_vector, logit_to_prob = get_loss_fn(photons, label_batch, shift_sigmoid=shift_sigmoid, tanh=tanh, loss_type=loss_fn)
+        loss_vector, logit_to_prob = get_loss_fn(photons, label_batch, bias=tf_bias, tanh=tanh, loss_type=loss_fn)
         # Average the loss over the batch for a stable gradient
         loss = tf.reduce_mean(loss_vector)
 
     if which_circuit == "new":
-        vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase, *tf_cx_theta.values()]
+        vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase, *tf_cx_theta.values(), tf_bias]
     else:
-        vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase]
+        vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase, tf_bias]
     grads = tape.gradient(loss, vars_)
     opt.apply_gradients(zip(grads, vars_))
 
-    if step % 5 == 0 and (step + 1) % 20 != 0 and (step + 1) != steps:
-        print(f"Step {step}/{steps} - Training Loss: {loss:.4f}", flush=True)
-    # -------- validation step ----------
+    if (step + 1) % 5 == 0 and (step + 1) % 20 != 0 and (step + 1) != steps:
+        print(f"Step {step+1}/{steps} - Training Loss: {loss:.4f}", flush=True)
+    # -------- lidation step ----------
     if (step + 1) % 20 == 0 or (step + 1) == steps:
         val_probs_pass = []
         val_losses_pass = []
@@ -305,7 +311,7 @@ for step in range(steps):
 
             state   = eng.run(prog, args=make_args(jet_batch_val)).state
             photons = tf.stack([state.mean_photon(m)[0] for m in range(3)], axis=1)
-            val_loss_vector, val_prob = get_loss_fn(photons, label_batch_val, shift_sigmoid=shift_sigmoid, tanh=tanh, loss_type=loss_fn)
+            val_loss_vector, val_prob = get_loss_fn(photons, label_batch_val, bias=tf_bias, tanh=tanh, loss_type=loss_fn)
             
             # Only store results for the actual validation data, not the padding
             val_probs_pass.extend(val_prob.numpy()[:actual_batch_size])
@@ -313,9 +319,9 @@ for step in range(steps):
 
         avg_val_loss = np.mean(val_losses_pass)
         auc_val = roc_auc_score(labels_val.numpy(), np.asarray(val_probs_pass))
-        if step == steps - 1:
-            step = steps  
-        print(f"Step {step}/{steps} - Training Loss: {loss:.4f} - Validation Loss: {avg_val_loss:.4f} - Validation AUC: {auc_val:.4f}", flush=True)
+        # if step == steps - 1:
+        #     step = steps  
+        print(f"Step {step+1}/{steps} - Training Loss: {loss:.4f} - Validation Loss: {avg_val_loss:.4f} - Validation AUC: {auc_val:.4f}", flush=True)
 
 # --------- Evaluate and print AUC ---------
 def predict_prob(jets_tensor, labels):
@@ -343,7 +349,7 @@ def predict_prob(jets_tensor, labels):
             eng.reset()
         state   = eng.run(prog, args=make_args(jet_batch)).state
         photons = tf.stack([state.mean_photon(m)[0] for m in range(3)], axis=1)
-        loss, prob = get_loss_fn(photons, label_batch, shift_sigmoid=shift_sigmoid, tanh=tanh, loss_type=loss_fn)
+        loss, prob = get_loss_fn(photons, label_batch, bias=tf_bias, tanh=tanh, loss_type=loss_fn)
         
         # Only store results for the actual data, not the padding
         probs.extend(prob.numpy()[:actual_batch_size])
