@@ -8,20 +8,28 @@ from helpers.plotting import *
 from circuits import default_circuit, new_circuit
 from helpers.utils import load_data, get_loss_fn
 from sklearn.metrics import roc_auc_score
+from tqdm import tqdm
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 tf.get_logger().setLevel('ERROR')
+
+# --- Force Randomness ---
+# Set seeds for reproducibility. By default, this will be different every run.
+seed = random.randint(0, 2**32 - 1)
+random.seed(seed)
+np.random.seed(seed)
+tf.random.set_seed(seed)
 
 # ----------  hyper-params ----------
 dim_cutoff      = 8 # fock cutoff dim - (8 is about the limit with new batched system)
 wires           = 4 # number of particles per jet (1 wire per particle) DO NOT GO ABOVE 4 (memory blows up)
 layers          = 1
-steps           = 100
-learning_rate   = 0.001 
+epochs          = 10
+learning_rate   = 0.01 
 batch_size      = 8 # (8 is about the limit with new batched system)
-train_jets      = 1000
-val_jets        = 200
-test_jets       = 1000 # Inference is not expensive!
+train_jets      = 1000 # /40000
+val_jets        = 200 # /10000
+test_jets       = 1000 # /20000
 
 # Loss function and activation parameters
 loss_fn         = "bce" # loss function: "bce" or "mse"
@@ -44,7 +52,7 @@ parser.add_argument('-name', type=str, help='Name for this run (used for saving 
 parser.add_argument('--dim_cutoff', type=int, default=dim_cutoff, help='Fock cutoff dimension')
 parser.add_argument('--wires', type=int, default=wires, help='Number of wires')
 parser.add_argument('--layers', type=int, default=layers, help='Number of layers')
-parser.add_argument('--steps', type=int, default=steps, help='Number of training steps')
+parser.add_argument('--epochs', type=int, default=epochs, help='Number of training epochs')
 parser.add_argument('--learning_rate', type=float, default=learning_rate, help='Learning rate')
 parser.add_argument('--batch_size', type=int, default=batch_size, help='Training batch size')
 parser.add_argument('--loss_fn', type=str, default=loss_fn, help='Loss function: "bce" or "mse"')
@@ -64,7 +72,7 @@ args = parser.parse_args()
 dim_cutoff    = args.dim_cutoff if args.dim_cutoff else dim_cutoff
 wires         = args.wires if args.wires else wires
 layers        = args.layers if args.layers else layers
-steps         = args.steps if args.steps else steps
+epochs        = args.epochs if args.epochs else epochs
 learning_rate = args.learning_rate if args.learning_rate else learning_rate
 batch_size    = args.batch_size if args.batch_size else batch_size
 loss_fn       = args.loss_fn if args.loss_fn else loss_fn
@@ -79,22 +87,35 @@ test_dir      = args.test_dir if args.test_dir else test_dir
 save_dir      = args.save_dir if args.save_dir else save_dir
 cli_test      = args.cli_test if args.cli_test else cli_test
 
+# Adjust val_jets and test_jets to be divisible by batch_size
+original_val_jets = val_jets
+val_jets = ((val_jets + batch_size - 1) // batch_size) * batch_size
+if original_val_jets != val_jets:
+    print(f"Adjusting val_jets from {original_val_jets} to {val_jets} to be divisible by batch_size {batch_size}", flush=True)
+
+original_test_jets = test_jets
+test_jets = ((test_jets + batch_size - 1) // batch_size) * batch_size
+if original_test_jets != test_jets:
+    print(f"Adjusting test_jets from {original_test_jets} to {test_jets} to be divisible by batch_size {batch_size}", flush=True)
+
+
 # Run name
+now_str = datetime.now().strftime("%Y_%m_%d_%H_%M")
 if args.name:
     # If the provided run_name already exists, append _i to make it unique
-    base_run_name = args.name
+    base_run_name = f"{now_str}_{args.name}"
     run_name = base_run_name
     i = 1
     while os.path.exists(f'{save_dir}/{run_name}'):
         run_name = f"{base_run_name}_{i}"
         i += 1
 else:
-    # Auto-generate a run name like 100_jets_BCE, 20_jets_MSE, etc.
-    base_name = f"{train_jets}_jets_{loss_fn}"
-    run_name = base_name
+    # Use just the datetime as the base name
+    base_run_name = now_str
+    run_name = base_run_name
     i = 1
     while os.path.exists(f'{save_dir}/{run_name}'):
-        run_name = f"{base_name}_{i}"
+        run_name = f"{base_run_name}_{i}"
         i += 1
 
 # Get current date and time
@@ -105,10 +126,11 @@ if cli_test == False:
     os.makedirs(os.path.join(save_dir, run_name), exist_ok=True)
     params = {
         "run_start_time": now,
+        "seed": seed,
         "dim_cutoff": dim_cutoff,
         "wires": wires,
         "layers": layers,
-        "steps": steps,
+        "epochs": epochs,
         "learning_rate": learning_rate,
         "batch_size": batch_size,
         "loss_fn": loss_fn,
@@ -132,10 +154,11 @@ if cli_test == False:
 # Print parameters
 print(f"Run started at: {now}", flush=True)
 print("PARAMETERS:")
+print(f"Random seed for this run: {seed}", flush=True)
 print(f"Dimension cutoff: {dim_cutoff}", flush=True)
 print(f"Wires: {wires}", flush=True)
 print(f"Layers: {layers}", flush=True)
-print(f"Steps: {steps}", flush=True)
+print(f"Epochs: {epochs}", flush=True)
 print(f"Learning rate: {learning_rate}", flush=True)
 print(f"Batch size: {batch_size}", flush=True)
 print(f"Loss function: {loss_fn}", flush=True)
@@ -149,8 +172,6 @@ print(f"Validation jets: {val_jets}", flush=True)
 print(f"Test jets: {test_jets}", flush=True)
 print(f"Run name: {run_name}", flush=True)
 print("------------------------------------", flush=True)
-
-
 
 # ----------  load datasets ---------- 
 jets, labels = load_data(data_dir, max_jets=train_jets, wires=wires)
@@ -256,79 +277,107 @@ eng = sf.Engine("tf", backend_options={"cutoff_dim": dim_cutoff, "batch_size": b
 
 # -------- training loop ----------
 print("Starting training...", flush=True)
-for step in range(steps):
-    # Select a random batch of jets
-    batch_indices = np.random.choice(train_jets, size=batch_size)
-    jet_batch   = tf.gather(jets, batch_indices)
-    label_batch = tf.gather(labels, batch_indices)
 
-    if eng.run_progs:
-        eng.reset()
+# Create a tf.data.Dataset for efficient batching and shuffling
+train_dataset = tf.data.Dataset.from_tensor_slices((jets, labels))
+train_dataset = train_dataset.shuffle(buffer_size=train_jets).batch(batch_size, drop_remainder=True)
 
-    with tf.GradientTape() as tape:
-        # Run the circuit for the entire batch
-        state   = eng.run(prog, args=make_args(jet_batch)).state
-        # state.mean_photon(m) returns a tuple (mean, variance), we only want the mean
-        photons = tf.stack([state.mean_photon(m)[0] for m in range(3)], axis=1)
-        # Calculate loss for the batch
-        loss_vector, logit_to_prob = get_loss_fn(photons, label_batch, bias=tf_bias, tanh=tanh, loss_type=loss_fn)
-        # Average the loss over the batch for a stable gradient
-        loss = tf.reduce_mean(loss_vector)
-
-    if which_circuit == "new":
-        vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase, *tf_cx_theta.values(), tf_bias]
+for epoch in range(epochs):
+    # Keep track of the loss for this epoch
+    epoch_loss = 0.0
+    num_steps = 0
+    # Use a dictionary to store gradient norms for each variable
+    epoch_grad_norms = {}
+    
+    # Loop over batches in the training set
+    if cli_test:
+        train_iterator = tqdm(enumerate(train_dataset), total=len(train_dataset), desc=f"Epoch {epoch+1}/{epochs}")
     else:
-        vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase, tf_bias]
-    grads = tape.gradient(loss, vars_)
-    opt.apply_gradients(zip(grads, vars_))
+        train_iterator = enumerate(train_dataset)
 
-    if (step + 1) % 5 == 0 and (step + 1) % 20 != 0 and (step + 1) != steps:
-        print(f"Step {step+1}/{steps} - Training Loss: {loss:.4f}", flush=True)
-    # -------- lidation step ----------
-    if (step + 1) % 20 == 0 or (step + 1) == steps:
-        val_probs_pass = []
-        val_losses_pass = []
-        
-        # Process validation set in batches
-        num_val_batches = (val_jets + batch_size - 1) // batch_size
-        for i in range(num_val_batches):
-            start = i * batch_size
-            end = start + batch_size
-            jet_batch_val = jets_val[start:end]
-            label_batch_val = labels_val[start:end]
+    for step, (jet_batch, label_batch) in train_iterator:
+        if eng.run_progs:
+            eng.reset()
 
-            actual_batch_size = jet_batch_val.shape[0]
-            # Pad the last batch if it's smaller than batch_size
-            if actual_batch_size < batch_size:
-                padding_size = batch_size - actual_batch_size
-                padding_jets = tf.zeros((padding_size, jets_val.shape[1], jets_val.shape[2]), dtype=tf.float32)
-                jet_batch_val = tf.concat([jet_batch_val, padding_jets], axis=0)
-                padding_labels = tf.zeros((padding_size,), dtype=tf.float32)
-                label_batch_val = tf.concat([label_batch_val, padding_labels], axis=0)
-
-            if eng.run_progs:
-                eng.reset()
-
-            state   = eng.run(prog, args=make_args(jet_batch_val)).state
+        with tf.GradientTape() as tape:
+            # Run the circuit for the entire batch
+            state   = eng.run(prog, args=make_args(jet_batch)).state
+            # state.mean_photon(m) returns a tuple (mean, variance), we only want the mean
             photons = tf.stack([state.mean_photon(m)[0] for m in range(3)], axis=1)
-            val_loss_vector, val_prob = get_loss_fn(photons, label_batch_val, bias=tf_bias, tanh=tanh, loss_type=loss_fn)
-            
-            # Only store results for the actual validation data, not the padding
-            val_probs_pass.extend(val_prob.numpy()[:actual_batch_size])
-            val_losses_pass.extend(val_loss_vector.numpy()[:actual_batch_size])
+            # Calculate loss for the batch
+            loss_vector, logit_to_prob = get_loss_fn(photons, label_batch, bias=tf_bias, tanh=tanh, loss_type=loss_fn)
+            # Average the loss over the batch for a stable gradient
+            loss = tf.reduce_mean(loss_vector)
 
-        avg_val_loss = np.mean(val_losses_pass)
-        auc_val = roc_auc_score(labels_val.numpy(), np.asarray(val_probs_pass))
-        # if step == steps - 1:
-        #     step = steps  
-        print(f"Step {step+1}/{steps} - Training Loss: {loss:.4f} - Validation Loss: {avg_val_loss:.4f} - Validation AUC: {auc_val:.4f}", flush=True)
+        if which_circuit == "new":
+            var_names = ['s_scale'] + [f'disp_mag_{i}' for i in range(wires)] +                 [f'disp_phase_{i}' for i in range(wires)] +                 [f'squeeze_mag_{i}' for i in range(wires)] +                 [f'squeeze_phase_{i}' for i in range(wires)] +                 [f'cx_theta_{a}_{b}' for a,b in cx_pairs] + ['bias']
+            vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase, *tf_cx_theta.values(), tf_bias]
+        else:
+            var_names = ['s_scale'] + [f'disp_mag_{i}' for i in range(wires)] +                 [f'disp_phase_{i}' for i in range(wires)] +                 [f'squeeze_mag_{i}' for i in range(wires)] +                 [f'squeeze_phase_{i}' for i in range(wires)] + ['bias']
+            vars_ = [tf_s_scale, *tf_disp_mag, *tf_disp_phase, *tf_squeeze_mag, *tf_squeeze_phase, tf_bias]
+        grads = tape.gradient(loss, vars_)
+        opt.apply_gradients(zip(grads, vars_))
+        
+        epoch_loss += loss.numpy()
+        num_steps += 1
+
+        if cli_test:
+            # Store the norm of each gradient for each variable
+            for i, g in enumerate(grads):
+                if g is not None:
+                    var_name = var_names[i]
+                    if var_name not in epoch_grad_norms:
+                        epoch_grad_norms[var_name] = []
+                    epoch_grad_norms[var_name].append(tf.norm(g).numpy())
+            train_iterator.set_postfix(loss=f"{loss.numpy():.4f}")
+
+        if not cli_test and (step + 1) % 10 == 0:
+            print(f"  Epoch {epoch+1}/{epochs}, Step {step+1}/{len(train_dataset)} - Batch Loss: {loss:.4f}", flush=True)
+
+    # -------- validation step at the end of each epoch ----------
+    avg_train_loss = epoch_loss / num_steps
+    val_probs_pass = []
+    val_losses_pass = []
+    
+    # Process validation set in batches
+    num_val_batches = val_jets // batch_size
+    for i in range(num_val_batches):
+        start = i * batch_size
+        end = start + batch_size
+        jet_batch_val = jets_val[start:end]
+        label_batch_val = labels_val[start:end]
+
+        if eng.run_progs:
+            eng.reset()
+
+        state   = eng.run(prog, args=make_args(jet_batch_val)).state
+        photons = tf.stack([state.mean_photon(m)[0] for m in range(3)], axis=1)
+        val_loss_vector, val_prob = get_loss_fn(photons, label_batch_val, bias=tf_bias, tanh=tanh, loss_type=loss_fn)
+        
+        val_probs_pass.extend(val_prob.numpy())
+        val_losses_pass.extend(val_loss_vector.numpy())
+
+    avg_val_loss = np.mean(val_losses_pass)
+    auc_val = roc_auc_score(labels_val.numpy(), np.asarray(val_probs_pass))
+    
+    if cli_test:
+        print(f"Epoch {epoch+1}/{epochs} - Training Loss: {avg_train_loss:.4f} - Validation Loss: {avg_val_loss:.4f} - Validation AUC: {auc_val:.4f}", flush=True)
+        # Diagnostic: Print the first 5 validation probabilities to check if they are changing
+        val_probs_preview = ", ".join([f"{p:.4f}" for p in val_probs_pass[:5]])
+        print(f"  Validation Probs Preview: [{val_probs_preview}]", flush=True)
+        print("  Average Gradient Norms per variable for this epoch:", flush=True)
+        for var_name, norms in sorted(epoch_grad_norms.items()):
+            avg_norm = np.mean(norms) if norms else 0.0
+            print(f"    {var_name}: {avg_norm:.6f}", flush=True)
+    else:
+        print(f"Epoch {epoch+1}/{epochs} - Training Loss: {avg_train_loss:.4f} - Validation Loss: {avg_val_loss:.4f} - Validation AUC: {auc_val:.4f}", flush=True)
 
 # --------- Evaluate and print AUC ---------
 def predict_prob(jets_tensor, labels):
     """Return an array of P(signal) for each jet."""
     probs = []
     total_jets = jets_tensor.shape[0]
-    num_batches = (total_jets + batch_size - 1) // batch_size
+    num_batches = total_jets // batch_size
 
     for i in range(num_batches):
         start = i * batch_size
@@ -336,23 +385,13 @@ def predict_prob(jets_tensor, labels):
         jet_batch = jets_tensor[start:end]
         label_batch = labels[start:end]
 
-        actual_batch_size = jet_batch.shape[0]
-        # Pad the last batch if it's smaller than batch_size
-        if actual_batch_size < batch_size:
-            padding_size = batch_size - actual_batch_size
-            padding_jets = tf.zeros((padding_size, jets_tensor.shape[1], jets_tensor.shape[2]), dtype=tf.float32)
-            jet_batch = tf.concat([jet_batch, padding_jets], axis=0)
-            padding_labels = tf.zeros((padding_size,), dtype=tf.float32)
-            label_batch = tf.concat([label_batch, padding_labels], axis=0)
-
         if eng.run_progs:
             eng.reset()
         state   = eng.run(prog, args=make_args(jet_batch)).state
         photons = tf.stack([state.mean_photon(m)[0] for m in range(3)], axis=1)
         loss, prob = get_loss_fn(photons, label_batch, bias=tf_bias, tanh=tanh, loss_type=loss_fn)
         
-        # Only store results for the actual data, not the padding
-        probs.extend(prob.numpy()[:actual_batch_size])
+        probs.extend(prob.numpy())
         
         if (end) >= total_jets or (i+1) % 5 == 0:
              print(f"  Processed {min(end, total_jets)}/{total_jets} jets", flush=True)
